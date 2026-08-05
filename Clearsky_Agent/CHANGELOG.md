@@ -1,11 +1,5 @@
 <!-- https://developers.home-assistant.io/docs/apps/presentation#keeping-a-changelog -->
 ## 0.0.1
 
-- Updated to Alpine 3.23 base image.
-- Renamed from "add-on" to "app".
-
-## 1.2.0
-
-- Add an apparmor profile
-- Update to 3.15 base image with s6 v3
-- Add a sample script to run as service and constrain in aa profile
+- Initial release of the ClearSky Agent.
+- Forked from the official Home Assistant example app.
