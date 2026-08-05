@@ -1,4 +1,4 @@
 # https://developers.home-assistant.io/docs/apps/repository#repository-configuration
-name: Example Home Assistant app repository
-url: 'https://github.com/home-assistant/apps-example'
+name: ClearSky app repository
+url: 'https://github.com/amollart/clearsky_agent'
 maintainer: Awesome Maintainer <awesome@example.com>

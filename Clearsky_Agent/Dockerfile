@@ -23,5 +23,5 @@ COPY rootfs /
 LABEL \
     org.opencontainers.image.title="Home Assistant App: Example app" \
     org.opencontainers.image.description="Example app to use as a blueprint for new apps." \
-    org.opencontainers.image.source="https://github.com/home-assistant/apps-example" \
+    org.opencontainers.image.source="https://github.com/amollart/clearsky_agent" \
     org.opencontainers.image.licenses="Apache License 2.0"
