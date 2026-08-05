@@ -1,8 +1,8 @@
 # https://developers.home-assistant.io/docs/apps/configuration#app-configuration
 name: ClearSky Agent
 version: "0.0.1"
-slug: example
-description: Example app
+slug: clearsky_agent
+description: ClearSky agent to report on local weather conditions.
 url: "https://github.com/amollart/clearsky_agent"
 arch:
   - aarch64
@@ -14,4 +14,4 @@ options:
   message: "Hello world..."
 schema:
   message: "str?"
-image: "ghcr.io/home-assistant/app-example"
+image: "ghcr.io/amollart/clearsky_agent"
