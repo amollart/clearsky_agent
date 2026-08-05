@@ -1,4 +1,4 @@
 # https://developers.home-assistant.io/docs/apps/repository#repository-configuration
 name: ClearSky app repository
 url: 'https://github.com/amollart/clearsky_agent'
-maintainer: Awesome Maintainer <awesome@example.com>
+maintainer: amollart
