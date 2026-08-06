@@ -27,10 +27,10 @@ profile clearsky_agent flags=(attach_disconnected,mediate_deleted) {
   # Access to options.json and other files within your app
   /data/** rw,
 
-  # Start new profile for service
-  /usr/bin/my_program cx -> my_program,
+  # Start new profile for clearsky_snapshot.py
+  /usr/bin/python3 cx -> clearsky_snapshot,
 
-  profile my_program flags=(attach_disconnected,mediate_deleted) {
+  profile clearsky_snapshot flags=(attach_disconnected,mediate_deleted) {
     #include <abstractions/base>
 
     # Receive signals from S6-Overlay
@@ -47,8 +47,8 @@ profile clearsky_agent flags=(attach_disconnected,mediate_deleted) {
     # 1. Add what is obviously needed based on what is in the script
     # 2. Add `complain` as a flag to this profile temporarily and run the app
     # 3. Review the audit log with `journalctl _TRANSPORT="audit" -g 'apparmor="ALLOWED"'` and add other access as needed
-    # Remember to remove the `complain` flag when you are done
-    /usr/bin/my_program r,
+    # Remember to remove the `complain` flag when you are done.
+    /usr/bin/python3 r,
     /bin/bash rix,
     /bin/echo ix,
     /etc/passwd r,

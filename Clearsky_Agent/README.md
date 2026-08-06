@@ -1,6 +1,6 @@
 # Home Assistant App: ClearSky Agent
 
-_ClearSky agent to report on local weather conditions._
+_ClearSky agent to fetch Home Assistant diagnostic snapshots and manage device warranty information._
 
 ![Supports aarch64 Architecture][aarch64-shield]
 ![Supports amd64 Architecture][amd64-shield]

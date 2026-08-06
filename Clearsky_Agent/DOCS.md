@@ -1,10 +1,11 @@
 # Home Assistant App: ClearSky Agent
 
 ## How to use
+This app acts as a ClearSky snapshot agent. It fetches a full Home Assistant diagnostic overview via the REST API every 90 seconds and writes rotating snapshots to `/config/clearsky_snapshots/clearsky_snapshot_N.json`.
 
-This app will report on local weather conditions.
+It also provides a web-based UI for managing warranty information for your Home Assistant devices. You can access this UI via the add-on's web interface.
 
-When started it will print the configured message or "Hello world" in the log.
-
-It will also print "All done!" in `/share/clearsky_agent_output.txt` to show
-a simple example of the usage of `map` in app config.
+The agent will:
+- Periodically fetch and save Home Assistant diagnostic snapshots.
+- Allow users to configure and track warranty information for devices through a web UI.
+- Store warranty data persistently in `/data/warranty_data.json`.
