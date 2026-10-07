@@ -1,0 +1,199 @@
+{
+  "timestamp": "2026-10-07T10:30:00.000000+01:00",
+  "devices": [
+    {
+      "id": "dev_hvac_main",
+      "name": "Main Hall Smart Thermostat",
+      "area": "Hallway",
+      "warranty_details": {
+        "warranty_state": "Active",
+        "expiry_date": "2027-11-20",
+        "updated_at": "2026-05-15T09:00:00"
+      },
+      "entities_data": [
+        {
+          "entity_id": "climate.hallway_thermostat",
+          "state": "heat",
+          "attributes": {
+            "current_temperature": 20.8,
+            "temperature": 21.5,
+            "target_temp_high": null,
+            "target_temp_low": null,
+            "hvac_action": "heating",
+            "preset_mode": "comfort",
+            "friendly_name": "Hallway Thermostat"
+          },
+          "last_reported": "2026-10-07T10:29:45+01:00"
+        },
+        {
+          "entity_id": "sensor.hallway_humidity",
+          "state": "46",
+          "attributes": {
+            "unit_of_measurement": "%",
+            "device_class": "humidity",
+            "friendly_name": "Hallway Humidity"
+          },
+          "last_reported": "2026-10-07T10:29:45+01:00"
+        }
+      ]
+    },
+    {
+      "id": "dev_solar_inverter",
+      "name": "Fronius Solar Inverter 5kW",
+      "area": "Utility Room",
+      "warranty_details": {
+        "warranty_state": "Active",
+        "expiry_date": "2031-03-01",
+        "updated_at": "2026-03-01T14:15:00"
+      },
+      "entities_data": [
+        {
+          "entity_id": "sensor.solar_power_output",
+          "state": "3420",
+          "attributes": {
+            "unit_of_measurement": "W",
+            "device_class": "power",
+            "friendly_name": "Solar Current Output"
+          },
+          "last_reported": "2026-10-07T10:29:50+01:00"
+        },
+        {
+          "entity_id": "sensor.solar_daily_yield",
+          "state": "14.8",
+          "attributes": {
+            "unit_of_measurement": "kWh",
+            "device_class": "energy",
+            "friendly_name": "Solar Yield Today"
+          },
+          "last_reported": "2026-10-07T10:29:50+01:00"
+        }
+      ]
+    },
+    {
+      "id": "dev_heat_pump",
+      "name": "Daikin Altherma Heat Pump",
+      "area": "Plant Room",
+      "warranty_details": {
+        "warranty_state": "Monitored",
+        "expiry_date": "N/A",
+        "updated_at": "2026-04-10T11:20:00"
+      },
+      "entities_data": [
+        {
+          "entity_id": "sensor.heat_pump_cop",
+          "state": "3.85",
+          "attributes": {
+            "unit_of_measurement": "COP",
+            "friendly_name": "Heat Pump Efficiency"
+          },
+          "last_reported": "2026-10-07T10:28:12+01:00"
+        },
+        {
+          "entity_id": "sensor.heat_pump_flow_temp",
+          "state": "42.5",
+          "attributes": {
+            "unit_of_measurement": "°C",
+            "device_class": "temperature",
+            "friendly_name": "Flow Water Temp"
+          },
+          "last_reported": "2026-10-07T10:28:12+01:00"
+        }
+      ]
+    },
+    {
+      "id": "dev_front_door_lock",
+      "name": "Yale Linus Smart Lock",
+      "area": "Front Entrance",
+      "warranty_details": {
+        "warranty_state": "Expired",
+        "expiry_date": "2025-12-31",
+        "updated_at": "2026-01-05T08:00:00"
+      },
+      "entities_data": [
+        {
+          "entity_id": "lock.front_door",
+          "state": "locked",
+          "attributes": {
+            "battery_level": 78,
+            "friendly_name": "Front Door Lock"
+          },
+          "last_reported": "2026-10-07T10:25:00+01:00"
+        },
+        {
+          "entity_id": "sensor.front_door_battery",
+          "state": "78",
+          "attributes": {
+            "unit_of_measurement": "%",
+            "device_class": "battery",
+            "friendly_name": "Front Door Lock Battery"
+          },
+          "last_reported": "2026-10-07T10:25:00+01:00"
+        }
+      ]
+    },
+    {
+      "id": "dev_ev_charger",
+      "name": "Zappi EV Charger 7kW",
+      "area": "Garage",
+      "warranty_details": {
+        "warranty_state": "Active",
+        "expiry_date": "2028-08-14",
+        "updated_at": "2026-08-14T16:30:00"
+      },
+      "entities_data": [
+        {
+          "entity_id": "sensor.zappi_charging_power",
+          "state": "6850",
+          "attributes": {
+            "unit_of_measurement": "W",
+            "device_class": "power",
+            "status": "Charging",
+            "friendly_name": "EV Charge Rate"
+          },
+          "last_reported": "2026-10-07T10:29:10+01:00"
+        },
+        {
+          "entity_id": "sensor.zappi_energy_delivered",
+          "state": "28.4",
+          "attributes": {
+            "unit_of_measurement": "kWh",
+            "device_class": "energy",
+            "friendly_name": "Session Energy"
+          },
+          "last_reported": "2026-10-07T10:29:10+01:00"
+        }
+      ]
+    },
+    {
+      "id": "dev_smoke_detector_kitchen",
+      "name": "Nest Protect Smoke & CO",
+      "area": "Kitchen",
+      "warranty_details": {
+        "warranty_state": "Active",
+        "expiry_date": "2029-02-18",
+        "updated_at": "2026-02-18T10:00:00"
+      },
+      "entities_data": [
+        {
+          "entity_id": "binary_sensor.kitchen_smoke_status",
+          "state": "off",
+          "attributes": {
+            "device_class": "smoke",
+            "friendly_name": "Smoke Detected"
+          },
+          "last_reported": "2026-10-07T10:29:55+01:00"
+        },
+        {
+          "entity_id": "binary_sensor.kitchen_co_status",
+          "state": "off",
+          "attributes": {
+            "device_class": "gas",
+            "friendly_name": "Carbon Monoxide"
+          },
+          "last_reported": "2026-10-07T10:29:55+01:00"
+        }
+      ]
+    }
+  ]
+}
+

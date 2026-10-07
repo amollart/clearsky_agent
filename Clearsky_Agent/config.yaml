@@ -1,7 +1,7 @@
-name: "ClearSky Agent"
-version: "0.0.2"
+name: "ClearSky Snapshot Agent"
+version: "0.2.1"
 slug: "clearsky_agent"
-description: "Generates periodic Home Assistant snapshots and manages device warranties."
+description: "Generates periodic Home Assistant snapshots for ClearSky and synchronizes with Azure Storage"
 startup: services
 boot: auto
 homeassistant_api: true
@@ -16,5 +16,11 @@ map:
   - config:rw
 options:
   poll_interval: 90
+  azure_upload_enabled: true
+  azure_storage_connection_string: ""
+  azure_container_name: "clearsky-snapshots"
 schema:
   poll_interval: int
+  azure_upload_enabled: bool?
+  azure_storage_connection_string: password?
+  azure_container_name: str?

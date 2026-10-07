@@ -14,6 +14,15 @@ import signal
 import sys
 from datetime import datetime, timezone
 
+# Try importing Azure Storage SDK
+try:
+    from azure.storage.blob import BlobServiceClient, ContentSettings
+    AZURE_SDK_AVAILABLE = True
+except ImportError:
+    BlobServiceClient = None
+    ContentSettings = None
+    AZURE_SDK_AVAILABLE = False
+
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 _LOGGER = logging.getLogger(__name__)
@@ -24,18 +33,52 @@ HA_TOKEN = os.getenv("SUPERVISOR_TOKEN") or os.getenv("HASSIO_TOKEN")
 WARRANTY_DATA_PATH = "/data/warranty_data.json"
 WS_URL = "ws://supervisor/core/websocket" # Moved to global scope
 
-def get_poll_interval():
-    """Read poll_interval from addon options, default to 300."""
-    try:
-        if os.path.exists("/data/options.json"):
-            with open("/data/options.json", "r") as f:
-                options = json.load(f)
-                return int(options.get("poll_interval", 300))
-    except Exception as e:
-        _LOGGER.warning(f"Could not read options.json, using default: {e}")
-    return 300
+def load_addon_config():
+    """Read configuration from /data/options.json with fallback to environment variables."""
+    config = {
+        "poll_interval": 90,
+        "azure_upload_enabled": True,
+        "azure_storage_connection_string": "",
+        "azure_container_name": "clearsky-snapshots",
+    }
+    if os.path.exists("/data/options.json"):
+        try:
+            with open("/data/options.json", "r", encoding="utf-8") as f:
+                opts = json.load(f)
+                if "poll_interval" in opts and opts["poll_interval"]:
+                    config["poll_interval"] = int(opts["poll_interval"])
+                if "azure_upload_enabled" in opts:
+                    config["azure_upload_enabled"] = bool(opts["azure_upload_enabled"])
+                if "azure_storage_connection_string" in opts and opts["azure_storage_connection_string"]:
+                    config["azure_storage_connection_string"] = str(opts["azure_storage_connection_string"]).strip()
+                if "azure_container_name" in opts and opts["azure_container_name"]:
+                    config["azure_container_name"] = str(opts["azure_container_name"]).strip()
+        except Exception as e:
+            _LOGGER.warning(f"Could not read options.json, using default: {e}")
 
-POLL_INTERVAL = 90  # Standardized to 90s for more frequent diagnostics
+    # Environment variable fallbacks/overrides
+    if os.getenv("POLL_INTERVAL"):
+        try:
+            config["poll_interval"] = int(os.getenv("POLL_INTERVAL"))
+        except ValueError:
+            pass
+    if os.getenv("AZURE_UPLOAD_ENABLED"):
+        config["azure_upload_enabled"] = os.getenv("AZURE_UPLOAD_ENABLED").lower() in ("true", "1", "yes")
+    if os.getenv("AZURE_STORAGE_CONNECTION_STRING"):
+        config["azure_storage_connection_string"] = os.getenv("AZURE_STORAGE_CONNECTION_STRING").strip()
+    if os.getenv("AZURE_CONTAINER_NAME"):
+        config["azure_container_name"] = os.getenv("AZURE_CONTAINER_NAME").strip()
+
+    return config
+
+# In-memory status tracker for Azure sync
+azure_upload_status = {
+    "last_status": "unconfigured",
+    "last_success": None,
+    "last_attempt": None,
+    "last_error": None,
+    "blobs_written": []
+}
 
 # Global shutdown event
 shutdown_event = asyncio.Event()
@@ -167,6 +210,10 @@ async def handle_index(request):
     </head>
     <body>
         <div class="card">
+            <div id="azureBanner" style="padding:10px 14px;border-radius:6px;margin-bottom:15px;font-size:13px;display:flex;align-items:center;justify-content:space-between;background:#e1f5fe;color:#0277bd;border:1px solid #b3e5fc">
+                <div>☁️ <strong>Azure Sync:</strong> <span id="azureStatus">Checking...</span></div>
+                <button type="button" class="btn-sm" onclick="checkStatus()" style="background:#0288d1;width:auto">Refresh</button>
+            </div>
             <h2>Warranty Configuration</h2>
             <label>Select Area:</label>
             <select id="areaSelect" onchange="updateDeviceList()"><option value="">Loading...</option></select>
@@ -267,7 +314,36 @@ async def handle_index(request):
                 const res = await fetch('./api/warranty', { method: 'POST', body: JSON.stringify(data), headers: {'Content-Type': 'application/json'} }); // Corrected 'currentWarranty[id] = data;' to 'load();'
                 if(res.ok) { document.getElementById('status').innerText = 'Saved!'; load(); }
             }
-            load(); toggleDate();
+            async function checkStatus() {
+                try {
+                    const res = await fetch('./api/status');
+                    const data = await res.json();
+                    const el = document.getElementById('azureStatus');
+                    const banner = document.getElementById('azureBanner');
+                    if (!data.azure.configured) {
+                        el.innerText = 'Not Configured (Add connection string in addon options)';
+                        banner.style.background = '#fff3e0';
+                        banner.style.color = '#e65100';
+                        banner.style.borderColor = '#ffe0b2';
+                    } else if (data.azure.status.last_status === 'success') {
+                        const time = data.azure.status.last_success ? new Date(data.azure.status.last_success).toLocaleTimeString() : 'Recent';
+                        el.innerText = `Connected & Synced (${time})`;
+                        banner.style.background = '#e8f5e9';
+                        banner.style.color = '#2e7d32';
+                        banner.style.borderColor = '#c8e6c9';
+                    } else if (data.azure.status.last_status === 'failed') {
+                        el.innerText = `Sync Failed: ${data.azure.status.last_error || 'Error'}`;
+                        banner.style.background = '#ffebee';
+                        banner.style.color = '#c62828';
+                        banner.style.borderColor = '#ffcdd2';
+                    } else {
+                        el.innerText = `Configured (${data.azure.status.last_status})`;
+                    }
+                } catch (e) {
+                    document.getElementById('azureStatus').innerText = 'Status check failed';
+                }
+            }
+            load(); toggleDate(); checkStatus();
         </script>
     </body>
     </html>
@@ -297,6 +373,23 @@ async def save_warranty_api(request):
     }
     save_warranty_data(current_data)
     return web.json_response({"status": "ok"})
+
+async def get_status_api(request):
+    """API returning system health and Azure upload status."""
+    config = load_addon_config()
+    conn_configured = bool(config.get("azure_storage_connection_string"))
+    return web.json_response({
+        "version": "0.2.1",
+        "poll_interval": config.get("poll_interval", 90),
+        "azure": {
+            "upload_enabled": config.get("azure_upload_enabled", True),
+            "configured": conn_configured,
+            "container_name": config.get("azure_container_name", "clearsky-snapshots"),
+            "sdk_available": AZURE_SDK_AVAILABLE,
+            "status": azure_upload_status
+        },
+        "server_time": datetime.now().astimezone().isoformat()
+    })
 
 async def fetch_full_snapshot():
     """
@@ -424,6 +517,96 @@ async def write_snapshot_async(snapshot: dict) -> None:
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, _write_snapshot_sync, snapshot)
 
+def _upload_to_azure_sync(snapshot: dict, config: dict) -> dict:
+    """
+    Upload snapshot to Azure Blob Storage using dual strategy:
+    1. Overwrite 'latest.json' for quick web app queries
+    2. Save timestamped snapshot 'snapshots/snapshot_{slug}.json' for historical archiving
+    """
+    if not AZURE_SDK_AVAILABLE:
+        raise RuntimeError("azure-storage-blob library is not installed in the environment.")
+
+    conn_str = config.get("azure_storage_connection_string")
+    container_name = config.get("azure_container_name", "clearsky-snapshots")
+
+    if not conn_str:
+        raise ValueError("Azure Storage connection string is empty.")
+
+    blob_service_client = BlobServiceClient.from_connection_string(conn_str)
+    container_client = blob_service_client.get_container_client(container_name)
+
+    # Ensure container exists
+    try:
+        container_client.create_container()
+        _LOGGER.info(f"Created Azure container '{container_name}'")
+    except Exception:
+        # Container already exists or permission only permits write
+        pass
+
+    json_str = json.dumps(snapshot, indent=2, ensure_ascii=False)
+    json_bytes = json_str.encode("utf-8")
+
+    content_settings = ContentSettings(
+        content_type="application/json; charset=utf-8",
+        cache_control="no-cache, no-store"
+    )
+
+    metadata = {
+        "device_count": str(len(snapshot.get("devices", []))),
+        "snapshot_timestamp": str(snapshot.get("timestamp", ""))
+    }
+
+    # 1. Overwrite latest.json for web app consumption
+    latest_blob = container_client.get_blob_client("latest.json")
+    latest_blob.upload_blob(
+        json_bytes,
+        overwrite=True,
+        content_settings=content_settings,
+        metadata=metadata
+    )
+
+    # 2. Upload timestamped historical snapshot
+    ts_raw = snapshot.get("timestamp", "")
+    slug = "".join(c for c in ts_raw.split(".")[0] if c.isdigit())
+    if not slug:
+        slug = datetime.now().strftime("%Y%m%d_%H%M%S")
+    history_blob_name = f"snapshots/snapshot_{slug}.json"
+
+    history_blob = container_client.get_blob_client(history_blob_name)
+    history_blob.upload_blob(
+        json_bytes,
+        overwrite=True,
+        content_settings=ContentSettings(content_type="application/json; charset=utf-8"),
+        metadata=metadata
+    )
+
+    return {
+        "container": container_name,
+        "latest_blob": "latest.json",
+        "history_blob": history_blob_name,
+        "size_bytes": len(json_bytes)
+    }
+
+async def upload_to_azure_async(snapshot: dict, config: dict) -> None:
+    """Asynchronously execute Azure upload without blocking the main event loop."""
+    global azure_upload_status
+    loop = asyncio.get_running_loop()
+    azure_upload_status["last_attempt"] = datetime.now().astimezone().isoformat()
+    try:
+        res = await loop.run_in_executor(None, _upload_to_azure_sync, snapshot, config)
+        azure_upload_status["last_status"] = "success"
+        azure_upload_status["last_success"] = datetime.now().astimezone().isoformat()
+        azure_upload_status["last_error"] = None
+        azure_upload_status["blobs_written"] = [res["latest_blob"], res["history_blob"]]
+        _LOGGER.info(
+            f"Successfully uploaded snapshot to Azure: {res['latest_blob']} & {res['history_blob']} "
+            f"({res['size_bytes']} bytes) in container '{res['container']}'"
+        )
+    except Exception as e:
+        azure_upload_status["last_status"] = "failed"
+        azure_upload_status["last_error"] = str(e)
+        _LOGGER.error(f"Failed to upload snapshot to Azure Storage: {e}")
+
 def handle_sigterm(signum, frame):
     """Graceful shutdown handler for Docker stop signals."""
     _LOGGER.info("Received SIGTERM – shutting down.")
@@ -442,10 +625,13 @@ async def background_tasks(app):
         pass
 
 async def main_loop():
-    """Run forever, polling and saving snapshots every POLL_INTERVAL seconds."""
+    """Run forever, polling and saving snapshots every configured poll interval."""
     _LOGGER.info("ClearSky agent snapshot loop started.")
 
     while not shutdown_event.is_set():
+        config = load_addon_config()
+        poll_interval = config.get("poll_interval", 90)
+
         if not HA_TOKEN:
             _LOGGER.error("SUPERVISOR_TOKEN not set. Waiting 30s...")
             try:
@@ -457,7 +643,18 @@ async def main_loop():
         try:
             snapshot = await fetch_full_snapshot()
             if snapshot:
+                # 1. Local rotated write
                 await write_snapshot_async(snapshot)
+
+                # 2. Azure Storage upload
+                if config.get("azure_upload_enabled"):
+                    if config.get("azure_storage_connection_string"):
+                        await upload_to_azure_async(snapshot, config)
+                    else:
+                        azure_upload_status["last_status"] = "unconfigured"
+                        _LOGGER.debug("Azure upload skipped: Connection string not set in options.")
+                else:
+                    azure_upload_status["last_status"] = "disabled"
         except asyncio.TimeoutError:
             _LOGGER.warning("API request timed out – will retry")
         except Exception as e:
@@ -465,7 +662,7 @@ async def main_loop():
 
         # Wait before next poll or until shutdown
         try:
-            await asyncio.wait_for(shutdown_event.wait(), timeout=POLL_INTERVAL)
+            await asyncio.wait_for(shutdown_event.wait(), timeout=poll_interval)
         except asyncio.TimeoutError:
             continue
 
@@ -477,6 +674,7 @@ def main():
     app.cleanup_ctx.append(background_tasks)
     
     app.router.add_get('/', handle_index)
+    app.router.add_get('/api/status', get_status_api)
     app.router.add_get('/api/registry', get_registry_api)
     app.router.add_get('/api/warranty', get_warranty_api)
     app.router.add_post('/api/warranty', save_warranty_api)

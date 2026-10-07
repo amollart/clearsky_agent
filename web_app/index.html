@@ -1,0 +1,925 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ClearSky | Snapshot Operations Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+          },
+          colors: {
+            skybrand: {
+              50: '#f0f9ff',
+              100: '#e0f2fe',
+              200: '#bae6fd',
+              400: '#38bdf8',
+              500: '#0ea5e9',
+              600: '#0284c7',
+              700: '#0369a1',
+              900: '#0c4a6e',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Custom scrollbars */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+    .dark ::-webkit-scrollbar-thumb { background: #475569; }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen antialiased flex flex-col font-sans">
+
+  <!-- TOP HEADER -->
+  <header class="border-b border-slate-800 bg-slate-900/90 backdrop-blur sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-skybrand-600 to-skybrand-400 flex items-center justify-center shadow-lg shadow-skybrand-500/20">
+          <svg class="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 00-9.78 2.096A4.001 4.001 0 003 15z" />
+          </svg>
+        </div>
+        <div>
+          <div class="flex items-center space-x-2">
+            <span class="font-extrabold text-lg tracking-tight text-white">ClearSky</span>
+            <span class="px-2 py-0.5 text-xs font-semibold rounded bg-skybrand-500/20 text-skybrand-400 border border-skybrand-500/30">PoC Explorer</span>
+          </div>
+          <p class="text-xs text-slate-400">Home Assistant Diagnostics & Azure Storage Sync</p>
+        </div>
+      </div>
+
+      <!-- Controls -->
+      <div class="flex items-center space-x-2 sm:space-x-4">
+        <!-- Live status pill -->
+        <div id="sourceBadge" class="hidden sm:flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-medium bg-slate-800 border border-slate-700 text-slate-300">
+          <span id="sourceIndicatorDot" class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+          <span id="sourceLabel">Connecting...</span>
+        </div>
+
+        <!-- Auto refresh selector -->
+        <div class="flex items-center text-xs text-slate-400 bg-slate-800 rounded-lg p-1 border border-slate-700">
+          <span class="px-2 hidden md:inline">Auto-Refresh:</span>
+          <select id="autoRefreshSelect" onchange="handleAutoRefreshChange()" class="bg-slate-900 text-slate-200 text-xs rounded px-2 py-1 outline-none border border-slate-700">
+            <option value="0">Off</option>
+            <option value="15">15s</option>
+            <option value="30" selected>30s</option>
+            <option value="60">60s</option>
+          </select>
+        </div>
+
+        <!-- Refresh button -->
+        <button onclick="fetchSnapshot()" id="refreshBtn" title="Refresh Snapshot" class="flex items-center space-x-1 px-3 py-1.5 bg-skybrand-600 hover:bg-skybrand-500 active:scale-95 transition text-white text-xs font-semibold rounded-lg shadow-sm">
+          <svg id="refreshIcon" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          <span class="hidden sm:inline">Refresh</span>
+        </button>
+
+        <!-- Source Settings Button -->
+        <button onclick="openConfigModal()" title="Source Settings" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN BODY -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full space-y-6">
+
+    <!-- HERO SNAPSHOT META BAR -->
+    <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4 backdrop-blur">
+      <div class="space-y-1">
+        <div class="flex items-center space-x-2">
+          <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-400 ring-4 ring-emerald-400/20"></span>
+          <span class="text-xs uppercase font-bold tracking-wider text-slate-400">Snapshot Timestamp</span>
+        </div>
+        <div class="flex items-baseline space-x-3">
+          <h1 id="metaTimestamp" class="text-xl sm:text-2xl font-bold text-white tracking-tight">--</h1>
+          <span id="metaRelativeTime" class="text-xs text-skybrand-400 font-medium">--</span>
+        </div>
+      </div>
+
+      <!-- Quick stats summary chips -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+        <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-3 flex flex-col">
+          <span class="text-[11px] font-medium text-slate-400">Devices</span>
+          <span id="statTotalDevices" class="text-xl font-extrabold text-white">0</span>
+        </div>
+        <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-3 flex flex-col">
+          <span class="text-[11px] font-medium text-emerald-400">Active Warranty</span>
+          <span id="statActiveWarranty" class="text-xl font-extrabold text-emerald-400">0</span>
+        </div>
+        <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-3 flex flex-col">
+          <span class="text-[11px] font-medium text-skybrand-400">Monitored</span>
+          <span id="statMonitored" class="text-xl font-extrabold text-skybrand-400">0</span>
+        </div>
+        <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-3 flex flex-col">
+          <span class="text-[11px] font-medium text-rose-400">Expired</span>
+          <span id="statExpired" class="text-xl font-extrabold text-rose-400">0</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- TABS NAVIGATION -->
+    <div class="flex items-center justify-between border-b border-slate-800">
+      <nav class="flex space-x-6 text-sm font-semibold">
+        <button onclick="switchTab('devices')" id="tabBtn-devices" class="pb-3 border-b-2 border-skybrand-500 text-skybrand-400 flex items-center space-x-2">
+          <span>Devices Inventory</span>
+          <span id="badgeDeviceCount" class="px-2 py-0.5 rounded-full text-[10px] bg-skybrand-500/20 text-skybrand-300">0</span>
+        </button>
+        <button onclick="switchTab('history')" id="tabBtn-history" class="pb-3 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center space-x-2">
+          <span>Snapshot History</span>
+        </button>
+        <button onclick="switchTab('raw')" id="tabBtn-raw" class="pb-3 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center space-x-2">
+          <span>Raw JSON Explorer</span>
+        </button>
+      </nav>
+      <div id="countdownBadge" class="hidden text-xs text-slate-500 font-mono pb-2">
+        Next refresh: <span id="countdownSeconds" class="text-slate-300 font-bold">30s</span>
+      </div>
+    </div>
+
+    <!-- TAB 1: DEVICE INVENTORY -->
+    <section id="tab-devices" class="space-y-4">
+      <!-- Search & Filters Bar -->
+      <div class="bg-slate-800/40 border border-slate-800 rounded-xl p-3 sm:p-4 flex flex-col md:flex-row gap-3 md:items-center justify-between">
+        <div class="relative flex-1 max-w-md">
+          <svg class="w-4 h-4 text-slate-400 absolute left-3 top-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input type="text" id="searchInput" oninput="applyFilters()" placeholder="Search by name, ID, area, or entity..." class="w-full bg-slate-900 border border-slate-700/80 rounded-lg pl-9 pr-4 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-skybrand-500" />
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 text-xs">
+          <!-- Area Filter -->
+          <div class="flex items-center space-x-1 bg-slate-900 rounded-lg px-2.5 py-1.5 border border-slate-700/80">
+            <span class="text-slate-400">Area:</span>
+            <select id="areaFilter" onchange="applyFilters()" class="bg-transparent text-slate-200 outline-none">
+              <option value="ALL">All Areas</option>
+            </select>
+          </div>
+
+          <!-- Warranty Filter -->
+          <div class="flex items-center space-x-1 bg-slate-900 rounded-lg px-2.5 py-1.5 border border-slate-700/80">
+            <span class="text-slate-400">Warranty:</span>
+            <select id="warrantyFilter" onchange="applyFilters()" class="bg-transparent text-slate-200 outline-none">
+              <option value="ALL">All States</option>
+              <option value="Active">Active</option>
+              <option value="Monitored">Monitored</option>
+              <option value="Expired">Expired</option>
+            </select>
+          </div>
+
+          <!-- Collapse All Button -->
+          <button onclick="toggleAllEntities()" id="collapseToggleBtn" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-medium transition">
+            Expand All
+          </button>
+        </div>
+      </div>
+
+      <!-- Devices Grid Container -->
+      <div id="devicesContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <!-- Rendered via JS -->
+      </div>
+
+      <!-- Empty state -->
+      <div id="emptyState" class="hidden py-16 text-center space-y-3 bg-slate-800/20 border border-slate-800 rounded-2xl">
+        <div class="w-12 h-12 mx-auto rounded-full bg-slate-800 flex items-center justify-center text-slate-500">
+          <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </div>
+        <h3 class="text-base font-semibold text-slate-300">No matching devices found</h3>
+        <p class="text-xs text-slate-500 max-w-sm mx-auto">Try adjusting your search keywords or clearing area/warranty filters.</p>
+      </div>
+    </section>
+
+    <!-- TAB 2: HISTORICAL SNAPSHOTS -->
+    <section id="tab-history" class="hidden space-y-4">
+      <div class="bg-slate-800/40 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
+        <div>
+          <h2 class="text-sm font-bold text-white">Historical Azure Snapshots</h2>
+          <p class="text-xs text-slate-400">Lists stored snapshots in the Azure Storage container <span id="historyContainerName" class="font-mono text-skybrand-400">clearsky-snapshots</span></p>
+        </div>
+        <button onclick="loadSnapshotList()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs rounded-lg border border-slate-700 text-slate-300 transition">
+          Refresh List
+        </button>
+      </div>
+      <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-800/60 text-slate-400 uppercase font-bold border-b border-slate-800">
+              <tr>
+                <th class="px-4 py-3">Snapshot Name</th>
+                <th class="px-4 py-3">Modified</th>
+                <th class="px-4 py-3">Size</th>
+                <th class="px-4 py-3 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody id="historyTableBody" class="divide-y divide-slate-800 font-mono text-slate-300">
+              <tr>
+                <td colspan="4" class="px-4 py-8 text-center text-slate-500">Loading historical snapshots from storage...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: RAW JSON EXPLORER -->
+    <section id="tab-raw" class="hidden space-y-4">
+      <div class="bg-slate-800/40 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
+        <div>
+          <h2 class="text-sm font-bold text-white">Complete Snapshot Payload</h2>
+          <p class="text-xs text-slate-400">Full JSON representation transmitted to Azure Storage</p>
+        </div>
+        <div class="flex items-center space-x-2">
+          <button onclick="copyRawJson()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs rounded-lg border border-slate-700 text-slate-300 transition flex items-center space-x-1">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+            <span id="copyJsonBtnText">Copy JSON</span>
+          </button>
+          <button onclick="downloadJsonFile()" class="px-3 py-1.5 bg-skybrand-600 hover:bg-skybrand-500 text-white text-xs font-semibold rounded-lg shadow-sm transition">
+            Download .json
+          </button>
+        </div>
+      </div>
+      <div class="bg-slate-950 border border-slate-800 rounded-2xl p-4 overflow-x-auto max-h-[600px]">
+        <pre id="rawJsonViewer" class="font-mono text-xs text-slate-300 leading-relaxed">Loading snapshot data...</pre>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- CONFIGURATION MODAL -->
+  <div id="configModal" class="hidden fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 class="text-lg font-bold text-white flex items-center space-x-2">
+          <svg class="w-5 h-5 text-skybrand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+          </svg>
+          <span>Data Source Configuration</span>
+        </h3>
+        <button onclick="closeConfigModal()" class="text-slate-400 hover:text-slate-200">
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+        </button>
+      </div>
+
+      <div class="space-y-4 text-xs">
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">Select Connection Mode:</label>
+          <div class="grid grid-cols-2 gap-2">
+            <button type="button" onclick="setMode('server')" id="modeBtn-server" class="p-3 rounded-xl border text-left flex flex-col space-y-1 transition border-skybrand-500 bg-skybrand-500/10 text-white">
+              <span class="font-bold">Backend API</span>
+              <span class="text-[10px] text-slate-400">Uses companion server proxy</span>
+            </button>
+            <button type="button" onclick="setMode('direct_azure')" id="modeBtn-direct_azure" class="p-3 rounded-xl border text-left flex flex-col space-y-1 transition border-slate-700 bg-slate-800/50 text-slate-300 hover:border-slate-600">
+              <span class="font-bold">Direct Azure Blob</span>
+              <span class="text-[10px] text-slate-400">Connect via Blob SAS URL</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Direct Azure Inputs -->
+        <div id="azureInputs" class="hidden space-y-3 bg-slate-950 p-3.5 rounded-xl border border-slate-800">
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">Azure Blob SAS URL (latest.json):</label>
+            <input type="text" id="cfgBlobUrl" placeholder="https://<storage>.blob.core.windows.net/<container>/latest.json?<sas_token>" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-skybrand-500" />
+            <p class="text-[10px] text-slate-500 mt-1">Requires read permission on the blob and CORS enabled on the storage account.</p>
+          </div>
+        </div>
+
+        <!-- Server URL Input -->
+        <div id="serverInputs" class="space-y-3 bg-slate-950 p-3.5 rounded-xl border border-slate-800">
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">Backend Server API URL:</label>
+            <input type="text" id="cfgServerUrl" value="/api/snapshot/latest" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-skybrand-500" />
+            <p class="text-[10px] text-slate-500 mt-1">Default is <code>/api/snapshot/latest</code> when running <code>python server.py</code>.</p>
+          </div>
+        </div>
+
+        <!-- Quick actions: Sample data & Upload -->
+        <div class="border-t border-slate-800 pt-3 flex items-center justify-between">
+          <button type="button" onclick="loadSampleSnapshot()" class="text-skybrand-400 hover:underline font-semibold flex items-center space-x-1">
+            <span>✨ Load Built-in Demo Data</span>
+          </button>
+          <label class="cursor-pointer text-slate-400 hover:text-slate-200 flex items-center space-x-1">
+            <span>📁 Upload Local File</span>
+            <input type="file" id="fileUploadInput" accept=".json" onchange="handleFileUpload(event)" class="hidden" />
+          </label>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end space-x-3 pt-3 border-t border-slate-800">
+        <button type="button" onclick="closeConfigModal()" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs transition">Cancel</button>
+        <button type="button" onclick="saveConfiguration()" class="px-4 py-2 rounded-xl bg-skybrand-600 hover:bg-skybrand-500 text-white font-semibold text-xs transition">Save & Connect</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST NOTIFICATION -->
+  <div id="toast" class="fixed bottom-5 right-5 z-50 transform translate-y-20 opacity-0 transition-all duration-300 px-4 py-3 rounded-xl shadow-xl flex items-center space-x-2 text-xs font-semibold border">
+    <span id="toastIcon"></span>
+    <span id="toastMsg"></span>
+  </div>
+
+  <!-- APPLICATION JAVASCRIPT -->
+  <script>
+    // State
+    let currentSnapshot = null;
+    let config = {
+      mode: 'server', // 'server' | 'direct_azure'
+      serverUrl: '/api/snapshot/latest',
+      blobUrl: '',
+      autoRefresh: 30
+    };
+    let refreshTimer = null;
+    let countdownInterval = null;
+    let secondsLeft = 30;
+    let areAllExpanded = false;
+
+    // Initialize from localStorage
+    function initConfig() {
+      const saved = localStorage.getItem('clearsky_cfg');
+      if (saved) {
+        try { config = { ...config, ...jsonParse(saved) }; } catch (e) {}
+      }
+      document.getElementById('cfgServerUrl').value = config.serverUrl;
+      document.getElementById('cfgBlobUrl').value = config.blobUrl;
+      document.getElementById('autoRefreshSelect').value = config.autoRefresh;
+      setMode(config.mode, false);
+    }
+
+    function setMode(mode, updateUI = true) {
+      config.mode = mode;
+      const btnServer = document.getElementById('modeBtn-server');
+      const btnAzure = document.getElementById('modeBtn-direct_azure');
+      const serverInputs = document.getElementById('serverInputs');
+      const azureInputs = document.getElementById('azureInputs');
+
+      if (mode === 'server') {
+        btnServer.className = "p-3 rounded-xl border text-left flex flex-col space-y-1 transition border-skybrand-500 bg-skybrand-500/10 text-white";
+        btnAzure.className = "p-3 rounded-xl border text-left flex flex-col space-y-1 transition border-slate-700 bg-slate-800/50 text-slate-300 hover:border-slate-600";
+        serverInputs.classList.remove('hidden');
+        azureInputs.classList.add('hidden');
+      } else {
+        btnAzure.className = "p-3 rounded-xl border text-left flex flex-col space-y-1 transition border-skybrand-500 bg-skybrand-500/10 text-white";
+        btnServer.className = "p-3 rounded-xl border text-left flex flex-col space-y-1 transition border-slate-700 bg-slate-800/50 text-slate-300 hover:border-slate-600";
+        azureInputs.classList.remove('hidden');
+        serverInputs.classList.add('hidden');
+      }
+    }
+
+    function openConfigModal() { document.getElementById('configModal').classList.remove('hidden'); }
+    function closeConfigModal() { document.getElementById('configModal').classList.add('hidden'); }
+
+    function saveConfiguration() {
+      config.serverUrl = document.getElementById('cfgServerUrl').value.trim() || '/api/snapshot/latest';
+      config.blobUrl = document.getElementById('cfgBlobUrl').value.trim();
+      localStorage.setItem('clearsky_cfg', JSON.stringify(config));
+      closeConfigModal();
+      showToast('Configuration updated', 'success');
+      fetchSnapshot();
+    }
+
+    // Tab switching
+    function switchTab(tab) {
+      ['devices', 'history', 'raw'].forEach(t => {
+        const section = document.getElementById(`tab-${t}`);
+        const btn = document.getElementById(`tabBtn-${t}`);
+        if (t === tab) {
+          section.classList.remove('hidden');
+          btn.className = "pb-3 border-b-2 border-skybrand-500 text-skybrand-400 flex items-center space-x-2";
+        } else {
+          section.classList.add('hidden');
+          btn.className = "pb-3 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center space-x-2";
+        }
+      });
+      if (tab === 'history') {
+        loadSnapshotList();
+      }
+    }
+
+    // Fetch snapshot
+    async function fetchSnapshot() {
+      const refreshBtn = document.getElementById('refreshBtn');
+      const refreshIcon = document.getElementById('refreshIcon');
+      refreshIcon.classList.add('animate-spin');
+
+      updateSourceStatus('Connecting...', 'amber');
+
+      try {
+        let snapshotData = null;
+
+        if (config.mode === 'direct_azure') {
+          if (!config.blobUrl) {
+            throw new Error('Azure Blob SAS URL is not configured. Please open Settings.');
+          }
+          const res = await fetch(config.blobUrl, { cache: 'no-store' });
+          if (!res.ok) throw new Error(`Azure HTTP ${res.status}: ${res.statusText}`);
+          snapshotData = await res.json();
+          updateSourceStatus('Azure Blob Storage (Direct)', 'emerald');
+        } else {
+          // Backend server
+          const res = await fetch(config.serverUrl, { cache: 'no-store' });
+          if (!res.ok) throw new Error(`Server API HTTP ${res.status}`);
+          const data = await res.json();
+          snapshotData = data.snapshot || data;
+          if (data.source === 'azure') {
+            updateSourceStatus(`Azure Storage (${data.container || 'clearsky-snapshots'})`, 'emerald');
+          } else if (data.source === 'sample_fallback') {
+            updateSourceStatus('Local Preview (Sample Data)', 'sky');
+          } else {
+            updateSourceStatus('Connected via Server', 'emerald');
+          }
+        }
+
+        currentSnapshot = snapshotData;
+        renderSnapshot(currentSnapshot);
+        showToast('Snapshot updated successfully', 'success');
+      } catch (err) {
+        console.warn('Fetch error:', err);
+        updateSourceStatus('Connection Failed', 'rose');
+        showToast(err.message, 'error');
+
+        // If no snapshot yet, load local sample so UI is immediately visible
+        if (!currentSnapshot) {
+          loadSampleSnapshot(false);
+        }
+      } finally {
+        setTimeout(() => refreshIcon.classList.remove('animate-spin'), 400);
+        resetAutoRefresh();
+      }
+    }
+
+    // Load sample snapshot
+    async function loadSampleSnapshot(notify = true) {
+      try {
+        const res = await fetch('./sample_snapshot.json');
+        if (res.ok) {
+          const data = await res.json();
+          currentSnapshot = data;
+          renderSnapshot(currentSnapshot);
+          updateSourceStatus('Demo Preview Mode', 'sky');
+          if (notify) {
+            closeConfigModal();
+            showToast('Loaded demo snapshot fixture', 'info');
+          }
+        }
+      } catch (e) {
+        console.error('Failed to load sample fixture:', e);
+      }
+    }
+
+    // Handle local file upload
+    function handleFileUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const data = JSON.parse(e.target.result);
+          currentSnapshot = data;
+          renderSnapshot(currentSnapshot);
+          updateSourceStatus(`Local File (${file.name})`, 'sky');
+          closeConfigModal();
+          showToast(`Loaded ${file.name}`, 'success');
+        } catch (err) {
+          showToast('Invalid JSON file format', 'error');
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    function updateSourceStatus(label, color) {
+      const badge = document.getElementById('sourceBadge');
+      const dot = document.getElementById('sourceIndicatorDot');
+      const lbl = document.getElementById('sourceLabel');
+      badge.classList.remove('hidden');
+
+      const colorMap = {
+        emerald: 'bg-emerald-400 shadow-emerald-400/50',
+        amber: 'bg-amber-400 shadow-amber-400/50',
+        rose: 'bg-rose-400 shadow-rose-400/50',
+        sky: 'bg-skybrand-400 shadow-skybrand-400/50'
+      };
+
+      dot.className = `w-2 h-2 rounded-full shadow-sm ${colorMap[color] || 'bg-slate-400'}`;
+      lbl.innerText = label;
+    }
+
+    // Render snapshot data into UI
+    function renderSnapshot(snapshot) {
+      if (!snapshot) return;
+
+      const devices = snapshot.devices || [];
+
+      // Timestamp display
+      const tsRaw = snapshot.timestamp;
+      if (tsRaw) {
+        try {
+          const date = new Date(tsRaw);
+          document.getElementById('metaTimestamp').innerText = date.toLocaleString();
+          document.getElementById('metaRelativeTime').innerText = getRelativeTimeString(date);
+        } catch (e) {
+          document.getElementById('metaTimestamp').innerText = tsRaw;
+        }
+      } else {
+        document.getElementById('metaTimestamp').innerText = 'Unknown Timestamp';
+      }
+
+      // Stats calculation
+      let activeW = 0, monitoredW = 0, expiredW = 0, totalEntities = 0;
+      const areasSet = new Set();
+
+      devices.forEach(dev => {
+        if (dev.area) areasSet.add(dev.area);
+        const w = dev.warranty_details;
+        if (w) {
+          const state = (w.warranty_state || '').toLowerCase();
+          if (state === 'active') activeW++;
+          else if (state === 'monitored') monitoredW++;
+          else if (state === 'expired') expiredW++;
+        }
+        if (Array.isArray(dev.entities_data)) {
+          totalEntities += dev.entities_data.length;
+        }
+      });
+
+      document.getElementById('statTotalDevices').innerText = devices.length;
+      document.getElementById('statActiveWarranty').innerText = activeW;
+      document.getElementById('statMonitored').innerText = monitoredW;
+      document.getElementById('statExpired').innerText = expiredW;
+      document.getElementById('badgeDeviceCount').innerText = devices.length;
+
+      // Populate Area filter options
+      const areaSelect = document.getElementById('areaFilter');
+      const currentArea = areaSelect.value;
+      areaSelect.innerHTML = '<option value="ALL">All Areas</option>';
+      Array.from(areasSet).sort().forEach(area => {
+        const opt = document.createElement('option');
+        opt.value = area;
+        opt.innerText = area;
+        if (area === currentArea) opt.selected = true;
+        areaSelect.appendChild(opt);
+      });
+
+      // Render raw JSON
+      document.getElementById('rawJsonViewer').textContent = JSON.stringify(snapshot, null, 2);
+
+      // Render Devices with current filters
+      applyFilters();
+    }
+
+    // Filter devices
+    function applyFilters() {
+      if (!currentSnapshot || !currentSnapshot.devices) return;
+
+      const query = (document.getElementById('searchInput').value || '').toLowerCase().trim();
+      const areaFilter = document.getElementById('areaFilter').value;
+      const warrantyFilter = document.getElementById('warrantyFilter').value;
+
+      const filtered = currentSnapshot.devices.filter(dev => {
+        // Area filter
+        if (areaFilter !== 'ALL' && dev.area !== areaFilter) return false;
+
+        // Warranty filter
+        if (warrantyFilter !== 'ALL') {
+          const state = (dev.warranty_details && dev.warranty_details.warranty_state) || 'None';
+          if (state.toLowerCase() !== warrantyFilter.toLowerCase()) return false;
+        }
+
+        // Query search
+        if (query) {
+          const nameMatch = (dev.name || '').toLowerCase().includes(query);
+          const idMatch = (dev.id || '').toLowerCase().includes(query);
+          const areaMatch = (dev.area || '').toLowerCase().includes(query);
+          const entityMatch = (dev.entities_data || []).some(e => 
+            (e.entity_id || '').toLowerCase().includes(query) ||
+            (e.attributes && e.attributes.friendly_name && e.attributes.friendly_name.toLowerCase().includes(query))
+          );
+          if (!nameMatch && !idMatch && !areaMatch && !entityMatch) return false;
+        }
+
+        return true;
+      });
+
+      renderDeviceCards(filtered);
+    }
+
+    // Render device cards
+    function renderDeviceCards(devices) {
+      const container = document.getElementById('devicesContainer');
+      const emptyState = document.getElementById('emptyState');
+
+      if (!devices || devices.length === 0) {
+        container.innerHTML = '';
+        emptyState.classList.remove('hidden');
+        return;
+      }
+
+      emptyState.classList.add('hidden');
+      container.innerHTML = devices.map(dev => renderSingleDeviceCard(dev)).join('');
+    }
+
+    function renderSingleDeviceCard(dev) {
+      const w = dev.warranty_details || {};
+      const state = w.warranty_state || 'Monitored';
+      const expiry = w.expiry_date || 'N/A';
+
+      // Badge style
+      let badgeClass = "bg-slate-800 text-slate-300 border-slate-700";
+      let dotColor = "bg-slate-400";
+      if (state === 'Active') {
+        badgeClass = "bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
+        dotColor = "bg-emerald-400";
+      } else if (state === 'Monitored') {
+        badgeClass = "bg-skybrand-500/10 text-skybrand-400 border-skybrand-500/30";
+        dotColor = "bg-skybrand-400";
+      } else if (state === 'Expired') {
+        badgeClass = "bg-rose-500/10 text-rose-400 border-rose-500/30";
+        dotColor = "bg-rose-400";
+      }
+
+      const entities = dev.entities_data || [];
+
+      return `
+        <div class="bg-slate-900/90 border border-slate-800 hover:border-slate-700 rounded-2xl p-5 flex flex-col justify-between shadow-sm transition space-y-4">
+          <!-- Card Header -->
+          <div class="space-y-2">
+            <div class="flex items-start justify-between gap-2">
+              <div>
+                <h3 class="font-bold text-base text-white tracking-tight leading-snug">${escapeHtml(dev.name || dev.id)}</h3>
+                <div class="flex items-center space-x-2 mt-1">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-slate-800 text-slate-400 border border-slate-700/60">
+                    📍 ${escapeHtml(dev.area || 'No Area')}
+                  </span>
+                  <span class="text-[10px] text-slate-500 font-mono">ID: ${escapeHtml(dev.id)}</span>
+                </div>
+              </div>
+
+              <!-- Warranty Pill -->
+              <div class="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${badgeClass}">
+                <span class="w-1.5 h-1.5 rounded-full ${dotColor}"></span>
+                <span>${escapeHtml(state)}</span>
+              </div>
+            </div>
+
+            <!-- Warranty Expiry Subtitle -->
+            <div class="text-[11px] text-slate-400 flex items-center justify-between pt-1 border-t border-slate-800/80">
+              <span>Expiry Date: <strong class="text-slate-300 font-mono">${escapeHtml(expiry)}</strong></span>
+              ${w.updated_at ? `<span class="text-[10px] text-slate-500 font-mono">Updated: ${escapeHtml(w.updated_at.split('T')[0])}</span>` : ''}
+            </div>
+          </div>
+
+          <!-- Entities List -->
+          <div class="space-y-2 pt-2 border-t border-slate-800">
+            <div class="flex items-center justify-between text-[11px] font-semibold text-slate-400">
+              <span>Monitored Entities (${entities.length})</span>
+              <button onclick="toggleCardEntities('${dev.id}')" class="text-skybrand-400 hover:underline">Toggle Details</button>
+            </div>
+
+            <div id="entities-${dev.id}" class="space-y-2 ${areAllExpanded ? '' : 'max-h-48 overflow-y-auto pr-1'}">
+              ${entities.map(e => renderEntityItem(e)).join('')}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderEntityItem(e) {
+      const state = e.state;
+      const attrs = e.attributes || {};
+      const friendlyName = attrs.friendly_name || e.entity_id;
+
+      // Extract highlights (temp, battery, power, unit)
+      let highlight = '';
+      if (attrs.unit_of_measurement) {
+        highlight = `${state} ${attrs.unit_of_measurement}`;
+      } else if (attrs.current_temperature !== undefined) {
+        highlight = `${attrs.current_temperature}°C (Target: ${attrs.temperature || 'N/A'}°C)`;
+      } else if (attrs.battery_level !== undefined) {
+        highlight = `🔋 ${attrs.battery_level}%`;
+      }
+
+      // State pill color
+      let stateColor = 'bg-slate-800 text-slate-300';
+      if (['on', 'heat', 'cool', 'home', 'locked', 'charging'].includes(state)) {
+        stateColor = 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30';
+      } else if (['unavailable', 'problem', 'unlocked'].includes(state)) {
+        stateColor = 'bg-rose-500/20 text-rose-400 border border-rose-500/30';
+      }
+
+      return `
+        <div class="bg-slate-950/70 border border-slate-800/80 rounded-xl p-2.5 text-xs space-y-1">
+          <div class="flex items-center justify-between">
+            <span class="font-medium text-slate-200 truncate pr-2" title="${escapeHtml(e.entity_id)}">${escapeHtml(friendlyName)}</span>
+            <span class="px-2 py-0.5 rounded text-[11px] font-mono font-bold ${stateColor}">${escapeHtml(state || 'unknown')}</span>
+          </div>
+
+          <div class="flex items-center justify-between text-[10px] text-slate-400 font-mono">
+            <span class="truncate max-w-[180px]">${escapeHtml(e.entity_id)}</span>
+            ${highlight ? `<span class="text-skybrand-300 font-semibold">${escapeHtml(highlight)}</span>` : ''}
+          </div>
+
+          ${e.last_reported ? `<div class="text-[9px] text-slate-500 text-right font-mono">Last reported: ${escapeHtml(e.last_reported.replace('T', ' ').split('.')[0])}</div>` : ''}
+        </div>
+      `;
+    }
+
+    function toggleCardEntities(devId) {
+      const el = document.getElementById(`entities-${devId}`);
+      if (el) {
+        if (el.classList.contains('max-h-48')) {
+          el.classList.remove('max-h-48');
+        } else {
+          el.classList.add('max-h-48');
+        }
+      }
+    }
+
+    function toggleAllEntities() {
+      areAllExpanded = !areAllExpanded;
+      document.getElementById('collapseToggleBtn').innerText = areAllExpanded ? 'Collapse All' : 'Expand All';
+      applyFilters();
+    }
+
+    // Historical snapshots listing
+    async function loadSnapshotList() {
+      const tbody = document.getElementById('historyTableBody');
+      tbody.innerHTML = '<tr><td colspan="4" class="px-4 py-8 text-center text-slate-500">Querying Azure Storage for snapshots...</td></tr>';
+
+      try {
+        const res = await fetch('/api/snapshots');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const blobs = data.blobs || [];
+
+        if (blobs.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="4" class="px-4 py-8 text-center text-slate-500">No snapshot blobs found in container yet.</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = blobs.map(b => `
+          <tr class="hover:bg-slate-800/40 transition">
+            <td class="px-4 py-3 font-semibold text-slate-200">${escapeHtml(b.name)}</td>
+            <td class="px-4 py-3 text-slate-400">${b.last_modified ? new Date(b.last_modified).toLocaleString() : 'N/A'}</td>
+            <td class="px-4 py-3 text-slate-400">${formatBytes(b.size)}</td>
+            <td class="px-4 py-3 text-right">
+              <button onclick="loadSpecificSnapshot('${encodeURIComponent(b.name)}')" class="px-2.5 py-1 rounded bg-skybrand-600 hover:bg-skybrand-500 text-white text-[11px] font-sans font-semibold transition">
+                Load View
+              </button>
+            </td>
+          </tr>
+        `).join('');
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="4" class="px-4 py-8 text-center text-rose-400">Failed to load snapshots: ${escapeHtml(err.message)}</td></tr>`;
+      }
+    }
+
+    async function loadSpecificSnapshot(blobName) {
+      showToast(`Loading ${decodeURIComponent(blobName)}...`, 'info');
+      try {
+        const res = await fetch(`/api/snapshot/${blobName}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        currentSnapshot = data.snapshot || data;
+        renderSnapshot(currentSnapshot);
+        updateSourceStatus(`Azure Blob: ${decodeURIComponent(blobName)}`, 'sky');
+        switchTab('devices');
+        showToast('Snapshot loaded', 'success');
+      } catch (e) {
+        showToast(`Failed: ${e.message}`, 'error');
+      }
+    }
+
+    // Auto-refresh timer
+    function handleAutoRefreshChange() {
+      const val = parseInt(document.getElementById('autoRefreshSelect').value, 10);
+      config.autoRefresh = val;
+      localStorage.setItem('clearsky_cfg', JSON.stringify(config));
+      resetAutoRefresh();
+    }
+
+    function resetAutoRefresh() {
+      if (refreshTimer) clearInterval(refreshTimer);
+      if (countdownInterval) clearInterval(countdownInterval);
+
+      const sec = config.autoRefresh;
+      const badge = document.getElementById('countdownBadge');
+      if (sec <= 0) {
+        badge.classList.add('hidden');
+        return;
+      }
+
+      badge.classList.remove('hidden');
+      secondsLeft = sec;
+      document.getElementById('countdownSeconds').innerText = `${secondsLeft}s`;
+
+      countdownInterval = setInterval(() => {
+        secondsLeft--;
+        if (secondsLeft <= 0) secondsLeft = sec;
+        document.getElementById('countdownSeconds').innerText = `${secondsLeft}s`;
+      }, 1000);
+
+      refreshTimer = setInterval(() => {
+        fetchSnapshot();
+      }, sec * 1000);
+    }
+
+    // Utilities
+    function copyRawJson() {
+      if (!currentSnapshot) return;
+      navigator.clipboard.writeText(JSON.stringify(currentSnapshot, null, 2));
+      const btn = document.getElementById('copyJsonBtnText');
+      btn.innerText = 'Copied!';
+      setTimeout(() => btn.innerText = 'Copy JSON', 2000);
+      showToast('JSON copied to clipboard', 'info');
+    }
+
+    function downloadJsonFile() {
+      if (!currentSnapshot) return;
+      const str = JSON.stringify(currentSnapshot, null, 2);
+      const blob = new Blob([str], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `clearsky_snapshot_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function getRelativeTimeString(date) {
+      const sec = Math.round((new Date() - date) / 1000);
+      if (sec < 60) return `${sec}s ago`;
+      const min = Math.round(sec / 60);
+      if (min < 60) return `${min}m ago`;
+      const hrs = Math.round(min / 60);
+      if (hrs < 24) return `${hrs}h ago`;
+      return `${Math.round(hrs / 24)}d ago`;
+    }
+
+    function formatBytes(bytes, decimals = 1) {
+      if (!bytes) return '0 B';
+      const k = 1024;
+      const dm = decimals < 0 ? 0 : decimals;
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str).replace(/[&<>"']/g, m => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[m]));
+    }
+
+    function showToast(message, type = 'info') {
+      const toast = document.getElementById('toast');
+      const icon = document.getElementById('toastIcon');
+      const msg = document.getElementById('toastMsg');
+
+      msg.innerText = message;
+      if (type === 'success') {
+        toast.className = "fixed bottom-5 right-5 z-50 px-4 py-3 rounded-xl shadow-xl flex items-center space-x-2 text-xs font-semibold bg-emerald-950 text-emerald-200 border border-emerald-800 transform translate-y-0 opacity-100 transition duration-300";
+        icon.innerText = "✓";
+      } else if (type === 'error') {
+        toast.className = "fixed bottom-5 right-5 z-50 px-4 py-3 rounded-xl shadow-xl flex items-center space-x-2 text-xs font-semibold bg-rose-950 text-rose-200 border border-rose-800 transform translate-y-0 opacity-100 transition duration-300";
+        icon.innerText = "⚠";
+      } else {
+        toast.className = "fixed bottom-5 right-5 z-50 px-4 py-3 rounded-xl shadow-xl flex items-center space-x-2 text-xs font-semibold bg-slate-800 text-skybrand-300 border border-slate-700 transform translate-y-0 opacity-100 transition duration-300";
+        icon.innerText = "ℹ";
+      }
+
+      setTimeout(() => {
+        toast.className = "fixed bottom-5 right-5 z-50 transform translate-y-20 opacity-0 transition-all duration-300 px-4 py-3 rounded-xl shadow-xl flex items-center space-x-2 text-xs font-semibold border";
+      }, 3500);
+    }
+
+    // Startup
+    window.addEventListener('DOMContentLoaded', () => {
+      initConfig();
+      fetchSnapshot();
+    });
+  </script>
+</body>
+</html>
+
