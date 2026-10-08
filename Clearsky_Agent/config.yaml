@@ -14,7 +14,6 @@ arch:
   - aarch64
 map:
   - homeassistant_config:rw
-image: "ghcr.io/amollart/clearsky-agent/{arch}"
 options:
   poll_interval: 90
   azure_upload_enabled: true
