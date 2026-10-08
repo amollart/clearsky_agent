@@ -115,7 +115,7 @@
       </div>
 
       <!-- Quick stats summary chips -->
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+      <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 sm:gap-3">
         <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-3 flex flex-col">
           <span class="text-[11px] font-medium text-slate-400">Devices</span>
           <span id="statTotalDevices" class="text-xl font-extrabold text-white">0</span>
@@ -131,6 +131,10 @@
         <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-3 flex flex-col">
           <span class="text-[11px] font-medium text-rose-400">Expired</span>
           <span id="statExpired" class="text-xl font-extrabold text-rose-400">0</span>
+        </div>
+        <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-3 flex flex-col">
+          <span class="text-[11px] font-medium text-slate-500">N/A</span>
+          <span id="statNA" class="text-xl font-extrabold text-slate-500">0</span>
         </div>
       </div>
     </div>
@@ -165,7 +169,7 @@
           <input type="text" id="searchInput" oninput="applyFilters()" placeholder="Search by name, ID, area, or entity..." class="w-full bg-slate-900 border border-slate-700/80 rounded-lg pl-9 pr-4 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-skybrand-500" />
         </div>
 
-        <div class="flex flex-wrap items-center gap-2 text-xs">
+        <div class="flex flex-wrap items-center gap-1 text-xs">
           <!-- Area Filter -->
           <div class="flex items-center space-x-1 bg-slate-900 rounded-lg px-2.5 py-1.5 border border-slate-700/80">
             <span class="text-slate-400">Area:</span>
@@ -182,6 +186,7 @@
               <option value="Active">Active</option>
               <option value="Monitored">Monitored</option>
               <option value="Expired">Expired</option>
+              <option value="N/A">N/A</option>
             </select>
           </div>
 
@@ -546,7 +551,7 @@
       }
 
       // Stats calculation
-      let activeW = 0, monitoredW = 0, expiredW = 0, totalEntities = 0;
+      let activeW = 0, monitoredW = 0, expiredW = 0, naW = 0, totalEntities = 0;
       const areasSet = new Set();
 
       devices.forEach(dev => {
@@ -557,6 +562,9 @@
           if (state === 'active') activeW++;
           else if (state === 'monitored') monitoredW++;
           else if (state === 'expired') expiredW++;
+          else if (state === '' || state === 'n/a') naW++;
+        } else {
+          naW++;
         }
         if (Array.isArray(dev.entities_data)) {
           totalEntities += dev.entities_data.length;
@@ -567,6 +575,7 @@
       document.getElementById('statActiveWarranty').innerText = activeW;
       document.getElementById('statMonitored').innerText = monitoredW;
       document.getElementById('statExpired').innerText = expiredW;
+      document.getElementById('statNA').innerText = naW;
       document.getElementById('badgeDeviceCount').innerText = devices.length;
 
       // Populate Area filter options
@@ -602,7 +611,7 @@
 
         // Warranty filter
         if (warrantyFilter !== 'ALL') {
-          const state = (dev.warranty_details && dev.warranty_details.warranty_state) || 'None';
+          const state = (dev.warranty_details && dev.warranty_details.warranty_state) || 'N/A';
           if (state.toLowerCase() !== warrantyFilter.toLowerCase()) return false;
         }
 
@@ -641,7 +650,7 @@
 
     function renderSingleDeviceCard(dev) {
       const w = dev.warranty_details || {};
-      const state = w.warranty_state || 'Monitored';
+      const state = w.warranty_state || 'N/A';
       const expiry = w.expiry_date || 'N/A';
 
       // Badge style
@@ -656,6 +665,9 @@
       } else if (state === 'Expired') {
         badgeClass = "bg-rose-500/10 text-rose-400 border-rose-500/30";
         dotColor = "bg-rose-400";
+      } else if (state === 'N/A') {
+        badgeClass = "bg-slate-600/10 text-slate-400 border-slate-600/30";
+        dotColor = "bg-slate-500";
       }
 
       const entities = dev.entities_data || [];
