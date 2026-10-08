@@ -309,6 +309,11 @@
             <input type="text" id="cfgBlobUrl" placeholder="https://<storage>.blob.core.windows.net/<container>/latest.json?<sas_token>" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-skybrand-500" />
             <p class="text-[10px] text-slate-500 mt-1">Requires read permission on the blob and CORS enabled on the storage account.</p>
           </div>
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">Container SAS URL (for history):</label>
+            <input type="text" id="cfgContainerUrl" placeholder="https://<storage>.blob.core.windows.net/<container>?<sas_token>" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-skybrand-500" />
+            <p class="text-[10px] text-slate-500 mt-1">Optional: SAS URL for the container to list snapshot history. Leave blank to disable history tab.</p>
+          </div>
         </div>
 
         <!-- Server URL Input -->
@@ -353,6 +358,7 @@
       mode: 'server', // 'server' | 'direct_azure'
       serverUrl: '/api/snapshot/latest',
       blobUrl: '',
+      containerUrl: '',
       autoRefresh: 30
     };
     let refreshTimer = null;
@@ -368,6 +374,7 @@
       }
       document.getElementById('cfgServerUrl').value = config.serverUrl;
       document.getElementById('cfgBlobUrl').value = config.blobUrl;
+      document.getElementById('cfgContainerUrl').value = config.containerUrl || '';
       document.getElementById('autoRefreshSelect').value = config.autoRefresh;
       setMode(config.mode, false);
     }
@@ -398,6 +405,7 @@
     function saveConfiguration() {
       config.serverUrl = document.getElementById('cfgServerUrl').value.trim() || '/api/snapshot/latest';
       config.blobUrl = document.getElementById('cfgBlobUrl').value.trim();
+      config.containerUrl = document.getElementById('cfgContainerUrl').value.trim();
       localStorage.setItem('clearsky_cfg', JSON.stringify(config));
       closeConfigModal();
       showToast('Configuration updated', 'success');
@@ -779,15 +787,55 @@
       tbody.innerHTML = '<tr><td colspan="4" class="px-4 py-8 text-center text-slate-500">Querying Azure Storage for snapshots...</td></tr>';
 
       try {
-        const res = await fetch('/api/snapshots');
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const blobs = data.blobs || [];
+        let blobs = [];
+
+        if (config.mode === 'direct_azure') {
+          // Direct Azure mode: use container SAS URL to list blobs
+          if (!config.containerUrl) {
+            tbody.innerHTML = '<tr><td colspan="4" class="px-4 py-8 text-center text-slate-500">Container SAS URL not configured. Please add it in Settings to enable snapshot history.</td></tr>';
+            return;
+          }
+
+          // Azure Blob Storage REST API to list blobs
+          const listUrl = config.containerUrl + '&restype=container&comp=list';
+          const res = await fetch(listUrl);
+          if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+
+          const xmlText = await res.text();
+          const parser = new DOMParser();
+          const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+
+          const blobElements = xmlDoc.getElementsByTagName('Blob');
+          for (let i = 0; i < blobElements.length; i++) {
+            const nameEl = blobElements[i].getElementsByTagName('Name')[0];
+            const propsEl = blobElements[i].getElementsByTagName('Properties')[0];
+            if (nameEl && propsEl) {
+              blobs.push({
+                name: nameEl.textContent,
+                size: parseInt(propsEl.getElementsByTagName('Content-Length')[0]?.textContent || '0'),
+                last_modified: propsEl.getElementsByTagName('Last-Modified')[0]?.textContent || null
+              });
+            }
+          }
+        } else {
+          // Server mode: use backend API
+          const res = await fetch('/api/snapshots');
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
+          blobs = data.blobs || [];
+        }
 
         if (blobs.length === 0) {
           tbody.innerHTML = '<tr><td colspan="4" class="px-4 py-8 text-center text-slate-500">No snapshot blobs found in container yet.</td></tr>';
           return;
         }
+
+        // Sort by last modified (newest first)
+        blobs.sort((a, b) => {
+          const dateA = a.last_modified ? new Date(a.last_modified) : new Date(0);
+          const dateB = b.last_modified ? new Date(b.last_modified) : new Date(0);
+          return dateB - dateA;
+        });
 
         tbody.innerHTML = blobs.map(b => `
           <tr class="hover:bg-slate-800/40 transition">
@@ -809,10 +857,27 @@
     async function loadSpecificSnapshot(blobName) {
       showToast(`Loading ${decodeURIComponent(blobName)}...`, 'info');
       try {
-        const res = await fetch(`/api/snapshot/${blobName}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        currentSnapshot = data.snapshot || data;
+        let snapshotData = null;
+
+        if (config.mode === 'direct_azure') {
+          // Direct Azure mode: construct blob URL from container SAS URL
+          if (!config.containerUrl) {
+            throw new Error('Container SAS URL not configured');
+          }
+          // Construct blob URL: container SAS URL + / + blob name
+          const blobUrl = config.containerUrl.split('?')[0] + '/' + blobName + '?' + config.containerUrl.split('?')[1];
+          const res = await fetch(blobUrl);
+          if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          snapshotData = await res.json();
+        } else {
+          // Server mode: use backend API
+          const res = await fetch(`/api/snapshot/${blobName}`);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
+          snapshotData = data.snapshot || data;
+        }
+
+        currentSnapshot = snapshotData;
         renderSnapshot(currentSnapshot);
         updateSourceStatus(`Azure Blob: ${decodeURIComponent(blobName)}`, 'sky');
         switchTab('devices');
