@@ -13,7 +13,7 @@ arch:
   - amd64
   - aarch64
 map:
-  - config:rw
+  - homeassistant_config:rw
 image: "ghcr.io/amollart/clearsky-agent/{arch}"
 options:
   poll_interval: 90
