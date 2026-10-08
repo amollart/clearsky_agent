@@ -1,5 +1,5 @@
 name: "ClearSky Snapshot Agent"
-version: "0.2.1"
+version: "0.2.2"
 slug: "clearsky_agent"
 description: "Generates periodic Home Assistant snapshots for ClearSky and synchronizes with Azure Storage"
 startup: services
