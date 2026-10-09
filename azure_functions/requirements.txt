@@ -1,7 +1,7 @@
 azure-functions
 azure-functions-worker
 azure-storage-blob
-pyodbc
+azure-cosmos
 python-jose[cryptography]
 passlib[bcrypt]
 python-dotenv

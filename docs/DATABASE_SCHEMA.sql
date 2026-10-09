@@ -1,41 +1,103 @@
--- ClearSky Platform Database Schema (Phase 1 MVP)
--- Run this in Azure SQL Database Query Editor
+# ClearSky Platform Database Schema (Phase 1 MVP)
+# Azure Cosmos DB (Serverless) - Cost-Optimized Option
 
--- Users Table
-CREATE TABLE users (
-  id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
-  azure_ad_id NVARCHAR(255) UNIQUE,
-  email NVARCHAR(255),
-  user_type NVARCHAR(50) CHECK (user_type IN ('end_user', 'installer', 'admin')),
-  created_at DATETIME2 DEFAULT GETDATE()
-);
+## Cosmos DB Setup
 
--- Instances Table
-CREATE TABLE instances (
-  id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
-  instance_uuid NVARCHAR(255) UNIQUE,
-  owner_id UNIQUEIDENTIFIER NOT NULL,
-  instance_name NVARCHAR(255),
-  storage_container NVARCHAR(255),
-  ha_version NVARCHAR(50),
-  last_sync DATETIME2,
-  created_at DATETIME2 DEFAULT GETDATE(),
-  FOREIGN KEY (owner_id) REFERENCES users(id)
-);
+### 1. Create Cosmos DB Account
+- API: SQL (Core)
+- Capacity Mode: Serverless
+- Region: Choose region closest to users
+- Consistency: Session (default)
 
--- Instance Access Table
-CREATE TABLE instance_access (
-  id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
-  instance_id UNIQUEIDENTIFIER NOT NULL,
-  user_id UNIQUEIDENTIFIER NOT NULL,
-  access_level NVARCHAR(50) CHECK (access_level IN ('viewer', 'full_access')),
-  created_at DATETIME2 DEFAULT GETDATE(),
-  FOREIGN KEY (instance_id) REFERENCES instances(id),
-  FOREIGN KEY (user_id) REFERENCES users(id)
-);
+### 2. Create Database
+- Database name: `clearsky-platform`
+- Throughput: Serverless (auto-scale)
 
--- Indexes for performance
-CREATE INDEX idx_instances_owner ON instances(owner_id);
-CREATE INDEX idx_instance_access_instance ON instance_access(instance_id);
-CREATE INDEX idx_instance_access_user ON instance_access(user_id);
-CREATE INDEX idx_instances_uuid ON instances(instance_uuid);
+### 3. Create Containers
+
+#### Users Container
+- Container name: `users`
+- Partition key: `/id`
+- Throughput: Serverless (auto-scale)
+
+Document structure:
+```json
+{
+  "id": "uuid",
+  "azure_ad_id": "azure_ad_id_or_null",
+  "email": "user@example.com",
+  "user_type": "end_user|installer|admin",
+  "created_at": "2026-10-09T12:00:00Z"
+}
+```
+
+#### Instances Container
+- Container name: `instances`
+- Partition key: `/id`
+- Throughput: Serverless (auto-scale)
+
+Document structure:
+```json
+{
+  "id": "uuid",
+  "instance_uuid": "unique_instance_id",
+  "owner_id": "user_uuid",
+  "instance_name": "My Home",
+  "storage_container": "instances/{instance_uuid}",
+  "ha_version": "2024.1.0",
+  "last_sync": "2026-10-09T12:00:00Z",
+  "created_at": "2026-10-09T12:00:00Z"
+}
+```
+
+#### Instance Access Container
+- Container name: `instance_access`
+- Partition key: `/id`
+- Throughput: Serverless (auto-scale)
+
+Document structure:
+```json
+{
+  "id": "uuid",
+  "instance_id": "instance_uuid",
+  "user_id": "user_uuid",
+  "access_level": "viewer|full_access",
+  "created_at": "2026-10-09T12:00:00Z"
+}
+```
+
+## Cost Comparison
+
+### Cosmos DB Serverless (Current):
+- Pay per request (RU)
+- ~50K requests/month = ~$0.0125/month
+- Auto-scales 0 to max
+- Perfect for MVP and early growth
+
+### Azure SQL (Previous):
+- Basic Serverless: ~$5-10/month
+- Fixed minimum cost
+- More expensive for low usage
+
+### Break-even Point:
+- Cosmos DB Serverless becomes expensive at ~1.2M RU/day
+- Can migrate to Provisioned Throughput at scale (no code changes)
+
+## Migration Path (When Ready to Scale):
+
+When you hit ~$50-100/month in serverless costs:
+1. In Azure Portal, change capacity mode from "Serverless" to "Provisioned"
+2. Set throughput (e.g., 400 RU/s)
+3. No code changes required - same API, same functionality
+
+## Advantages of Cosmos DB Serverless:
+
+✅ Pay only for what you use
+✅ Auto-scales from 0 to max
+✅ No minimum cost
+✅ Seamless migration to provisioned at scale
+✅ Global distribution (when needed)
+✅ 99.99% SLA available
+✅ Built-in indexing
+✅ Low latency
+✅ Supports all future features (trials, subscriptions, etc.)

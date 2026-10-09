@@ -5,7 +5,7 @@ import uuid
 import os
 from datetime import datetime
 from azure.storage.blob import BlobServiceClient
-import pyodbc
+from azure.cosmos import CosmosClient, PartitionKey
 from python_jose import jwt
 from passlib.context import CryptContext
 
@@ -18,12 +18,29 @@ logger = logging.getLogger(__name__)
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# Database connection
-def get_db_connection():
-    conn_str = os.environ.get("AZURE_SQL_CONNECTION_STRING")
-    if not conn_str:
-        raise ValueError("AZURE_SQL_CONNECTION_STRING not set")
-    return pyodbc.connect(conn_str)
+# Cosmos DB client
+cosmos_client = None
+database = None
+users_container = None
+instances_container = None
+instance_access_container = None
+
+def get_cosmos_client():
+    global cosmos_client, database, users_container, instances_container, instance_access_container
+    
+    if cosmos_client is None:
+        conn_str = os.environ.get("COSMOS_DB_CONNECTION_STRING")
+        if not conn_str:
+            raise ValueError("COSMOS_DB_CONNECTION_STRING not set")
+        
+        cosmos_client = CosmosClient.from_connection_string(conn_str)
+        database = cosmos_client.get_database_client("clearsky-platform")
+        
+        users_container = database.get_container_client("users")
+        instances_container = database.get_container_client("instances")
+        instance_access_container = database.get_container_client("instance_access")
+    
+    return cosmos_client
 
 # Blob storage client
 def get_blob_client():
@@ -59,40 +76,32 @@ def register_user(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype="application/json"
             )
         
+        get_cosmos_client()
+        
         user_id = str(uuid.uuid4())
         registration_token = str(uuid.uuid4())
         
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        user_doc = {
+            "id": user_id,
+            "azure_ad_id": None,
+            "email": email,
+            "user_type": user_type,
+            "created_at": datetime.now().isoformat()
+        }
         
-        try:
-            cursor.execute("""
-                INSERT INTO users (id, email, user_type, created_at)
-                VALUES (?, ?, ?, GETDATE())
-            """, user_id, email, user_type)
-            conn.commit()
-            
-            logger.info(f"Created user: {user_id} ({user_type})")
-            
-            return func.HttpResponse(
-                json.dumps({
-                    "user_id": user_id,
-                    "registration_token": registration_token,
-                    "user_type": user_type
-                }),
-                status_code=200,
-                mimetype="application/json"
-            )
-        except Exception as e:
-            conn.rollback()
-            logger.error(f"Database error: {e}")
-            return func.HttpResponse(
-                json.dumps({"error": str(e)}),
-                status_code=500,
-                mimetype="application/json"
-            )
-        finally:
-            conn.close()
+        users_container.create_item(body=user_doc)
+        
+        logger.info(f"Created user: {user_id} ({user_type})")
+        
+        return func.HttpResponse(
+            json.dumps({
+                "user_id": user_id,
+                "registration_token": registration_token,
+                "user_type": user_type
+            }),
+            status_code=200,
+            mimetype="application/json"
+        )
             
     except Exception as e:
         logger.error(f"Registration error: {e}")
@@ -119,67 +128,65 @@ def register_instance(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype="application/json"
             )
         
-        # In a real implementation, validate the registration_token
-        # For MVP, we'll accept any token and create the instance
+        get_cosmos_client()
         
         # Check if instance already exists
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        query = "SELECT * FROM instances c WHERE c.instance_uuid = @instance_uuid"
+        parameters = [{"name": "@instance_uuid", "value": instance_uuid}]
         
-        try:
-            cursor.execute("""
-                SELECT id FROM instances WHERE instance_uuid = ?
-            """, instance_uuid)
-            existing = cursor.fetchone()
+        existing = list(instances_container.query_items(
+            query=query,
+            parameters=parameters,
+            enable_cross_partition_query=True
+        ))
+        
+        if existing:
+            instance_id = existing[0]["id"]
+            storage_container = existing[0]["storage_container"]
+            logger.info(f"Instance already registered: {instance_id}")
+        else:
+            instance_id = str(uuid.uuid4())
+            storage_container = f"instances/{instance_uuid}"
             
-            if existing:
-                instance_id = existing[0]
-                logger.info(f"Instance already registered: {instance_id}")
-            else:
-                instance_id = str(uuid.uuid4())
-                storage_container = f"instances/{instance_uuid}"
-                
-                # Create user record if it doesn't exist (for MVP)
-                # In production, this would be validated via registration_token
-                owner_id = str(uuid.uuid4())
-                cursor.execute("""
-                    INSERT INTO users (id, email, user_type, created_at)
-                    VALUES (?, ?, 'end_user', GETDATE())
-                """, owner_id, f"user_{instance_uuid[:8]}")
-                
-                cursor.execute("""
-                    INSERT INTO instances (id, instance_uuid, owner_id, instance_name, storage_container, ha_version, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, GETDATE())
-                """, instance_id, instance_uuid, owner_id, instance_name, storage_container, ha_version)
-                
-                # Create container in Blob Storage
-                blob_client = get_blob_client()
-                container_client = blob_client.get_container_client(storage_container)
-                container_client.create_container()
-                
-                conn.commit()
-                logger.info(f"Registered new instance: {instance_id}")
+            # Create user record if it doesn't exist (for MVP)
+            owner_id = str(uuid.uuid4())
+            user_doc = {
+                "id": owner_id,
+                "azure_ad_id": None,
+                "email": f"user_{instance_uuid[:8]}",
+                "user_type": "end_user",
+                "created_at": datetime.now().isoformat()
+            }
+            users_container.create_item(body=user_doc)
             
-            return func.HttpResponse(
-                json.dumps({
-                    "instance_id": instance_id,
-                    "storage_container": f"instances/{instance_uuid}",
-                    "api_key": registration_token  # For MVP, use same token
-                }),
-                status_code=200,
-                mimetype="application/json"
-            )
+            instance_doc = {
+                "id": instance_id,
+                "instance_uuid": instance_uuid,
+                "owner_id": owner_id,
+                "instance_name": instance_name,
+                "storage_container": storage_container,
+                "ha_version": ha_version,
+                "last_sync": None,
+                "created_at": datetime.now().isoformat()
+            }
+            instances_container.create_item(body=instance_doc)
             
-        except Exception as e:
-            conn.rollback()
-            logger.error(f"Database error: {e}")
-            return func.HttpResponse(
-                json.dumps({"error": str(e)}),
-                status_code=500,
-                mimetype="application/json"
-            )
-        finally:
-            conn.close()
+            # Create container in Blob Storage
+            blob_client = get_blob_client()
+            container_client = blob_client.get_container_client(storage_container)
+            container_client.create_container()
+            
+            logger.info(f"Registered new instance: {instance_id}")
+        
+        return func.HttpResponse(
+            json.dumps({
+                "instance_id": instance_id,
+                "storage_container": storage_container,
+                "api_key": registration_token  # For MVP, use same token
+            }),
+            status_code=200,
+            mimetype="application/json"
+        )
             
     except Exception as e:
         logger.error(f"Instance registration error: {e}")
@@ -194,30 +201,28 @@ def register_instance(req: func.HttpRequest) -> func.HttpResponse:
 def get_instances(req: func.HttpRequest) -> func.HttpResponse:
     # For MVP, skip auth - will add in production
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        get_cosmos_client()
         
-        cursor.execute("""
-            SELECT i.id, i.instance_uuid, i.instance_name, i.storage_container, i.last_sync, i.created_at,
-                   u.email as owner_email
-            FROM instances i
-            LEFT JOIN users u ON i.owner_id = u.id
-            ORDER BY i.created_at DESC
-        """)
+        query = "SELECT * FROM instances c ORDER BY c.created_at DESC"
+        items = list(instances_container.query_items(
+            query=query,
+            enable_cross_partition_query=True
+        ))
         
         instances = []
-        for row in cursor.fetchall():
+        for item in items:
+            # Get owner email
+            owner = users_container.read_item(item=item["owner_id"], partition_key=item["owner_id"])
+            
             instances.append({
-                "id": row[0],
-                "instance_uuid": row[1],
-                "instance_name": row[2],
-                "storage_container": row[3],
-                "last_sync": str(row[4]) if row[4] else None,
-                "created_at": str(row[5]) if row[5] else None,
-                "owner_email": row[6]
+                "id": item["id"],
+                "instance_uuid": item["instance_uuid"],
+                "instance_name": item["instance_name"],
+                "storage_container": item["storage_container"],
+                "last_sync": item.get("last_sync"),
+                "created_at": item["created_at"],
+                "owner_email": owner.get("email") if owner else None
             })
-        
-        conn.close()
         
         return func.HttpResponse(
             json.dumps({"instances": instances}),
@@ -247,25 +252,27 @@ def upload_snapshot(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype="application/json"
             )
         
+        get_cosmos_client()
+        
         # Get instance info
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        query = "SELECT * FROM instances c WHERE c.instance_uuid = @instance_uuid"
+        parameters = [{"name": "@instance_uuid", "value": instance_uuid}]
         
-        cursor.execute("""
-            SELECT storage_container FROM instances WHERE instance_uuid = ?
-        """, instance_uuid)
+        items = list(instances_container.query_items(
+            query=query,
+            parameters=parameters,
+            enable_cross_partition_query=True
+        ))
         
-        row = cursor.fetchone()
-        if not row:
-            conn.close()
+        if not items:
             return func.HttpResponse(
                 json.dumps({"error": "Instance not found"}),
                 status_code=404,
                 mimetype="application/json"
             )
         
-        storage_container = row[0]
-        conn.close()
+        instance = items[0]
+        storage_container = instance["storage_container"]
         
         # Upload to Blob Storage
         blob_client = get_blob_client()
@@ -288,13 +295,8 @@ def upload_snapshot(req: func.HttpRequest) -> func.HttpResponse:
         )
         
         # Update last_sync in database
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE instances SET last_sync = GETDATE() WHERE instance_uuid = ?
-        """, instance_uuid)
-        conn.commit()
-        conn.close()
+        instance["last_sync"] = datetime.now().isoformat()
+        instances_container.replace_item(item=instance["id"], body=instance)
         
         logger.info(f"Uploaded snapshot for instance {instance_uuid}")
         
@@ -318,25 +320,26 @@ def get_latest_snapshot(req: func.HttpRequest) -> func.HttpResponse:
     try:
         instance_uuid = req.route_params.get("instance_uuid")
         
+        get_cosmos_client()
+        
         # Get instance info
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        query = "SELECT * FROM instances c WHERE c.instance_uuid = @instance_uuid"
+        parameters = [{"name": "@instance_uuid", "value": instance_uuid}]
         
-        cursor.execute("""
-            SELECT storage_container FROM instances WHERE instance_uuid = ?
-        """, instance_uuid)
+        items = list(instances_container.query_items(
+            query=query,
+            parameters=parameters,
+            enable_cross_partition_query=True
+        ))
         
-        row = cursor.fetchone()
-        if not row:
-            conn.close()
+        if not items:
             return func.HttpResponse(
                 json.dumps({"error": "Instance not found"}),
                 status_code=404,
                 mimetype="application/json"
             )
         
-        storage_container = row[0]
-        conn.close()
+        storage_container = items[0]["storage_container"]
         
         # Download from Blob Storage
         blob_client = get_blob_client()

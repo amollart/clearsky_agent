@@ -9,11 +9,12 @@
 - **Region**: Choose region closest to users
 - **Storage Account**: Required for Functions
 
-### 2. Azure SQL Database
-- **Resource Type**: SQL Database
-- **Tier**: Basic (for MVP)
-- **Compute**: Serverless (auto-pause when not in use)
-- **Backup**: Point-in-time restore enabled
+### 2. Azure Cosmos DB (Serverless)
+- **Resource Type**: Azure Cosmos DB Account
+- **API**: SQL (Core)
+- **Capacity Mode**: Serverless
+- **Region**: Same region as Functions
+- **Consistency**: Session (default)
 
 ### 3. Azure Blob Storage
 - **Resource Type**: Storage Account (V2)
@@ -32,72 +33,91 @@
 - **Branch**: main
 - **Build**: GitHub Actions auto-deploy
 
-## Database Schema
+## Cosmos DB Setup
 
-```sql
--- Users Table
-CREATE TABLE users (
-  id UUID PRIMARY KEY DEFAULT (NEWID()),
-  azure_ad_id VARCHAR(255) UNIQUE,
-  email VARCHAR(255),
-  user_type VARCHAR(50) CHECK (user_type IN ('end_user', 'installer', 'admin')),
-  created_at DATETIME2 DEFAULT GETDATE()
-);
+### Create Database and Containers
 
--- Instances Table
-CREATE TABLE instances (
-  id UUID PRIMARY KEY DEFAULT (NEWID()),
-  instance_uuid VARCHAR(255) UNIQUE,
-  owner_id UUID NOT NULL,
-  instance_name VARCHAR(255),
-  storage_container VARCHAR(255),
-  ha_version VARCHAR(50),
-  last_sync DATETIME2,
-  created_at DATETIME2 DEFAULT GETDATE(),
-  FOREIGN KEY (owner_id) REFERENCES users(id)
-);
+1. In Azure Portal, go to your Cosmos DB account
+2. Create a new database named `clearsky-platform`
+3. Create three containers:
 
--- Instance Access Table
-CREATE TABLE instance_access (
-  id UUID PRIMARY KEY DEFAULT (NEWID()),
-  instance_id UUID NOT NULL,
-  user_id UUID NOT NULL,
-  access_level VARCHAR(50) CHECK (access_level IN ('viewer', 'full_access')),
-  created_at DATETIME2 DEFAULT GETDATE(),
-  FOREIGN KEY (instance_id) REFERENCES instances(id),
-  FOREIGN KEY (user_id) REFERENCES users(id)
-);
+#### Users Container
+- **Container name**: `users`
+- **Partition key**: `/id`
+- **Throughput**: Serverless (auto-scale)
 
--- Indexes for performance
-CREATE INDEX idx_instances_owner ON instances(owner_id);
-CREATE INDEX idx_instance_access_instance ON instance_access(instance_id);
-CREATE INDEX idx_instance_access_user ON instance_access(user_id);
+#### Instances Container
+- **Container name**: `instances`
+- **Partition key**: `/id`
+- **Throughput**: Serverless (auto-scale)
+
+#### Instance Access Container
+- **Container name**: `instance_access`
+- **Partition key**: `/id`
+- **Throughput**: Serverless (auto-scale)
+
+### Document Structures
+
+**Users Document:**
+```json
+{
+  "id": "uuid",
+  "azure_ad_id": "azure_ad_id_or_null",
+  "email": "user@example.com",
+  "user_type": "end_user|installer|admin",
+  "created_at": "2026-10-09T12:00:00Z"
+}
+```
+
+**Instances Document:**
+```json
+{
+  "id": "uuid",
+  "instance_uuid": "unique_instance_id",
+  "owner_id": "user_uuid",
+  "instance_name": "My Home",
+  "storage_container": "instances/{instance_uuid}",
+  "ha_version": "2024.1.0",
+  "last_sync": "2026-10-09T12:00:00Z",
+  "created_at": "2026-10-09T12:00:00Z"
+}
+```
+
+**Instance Access Document:**
+```json
+{
+  "id": "uuid",
+  "instance_id": "instance_uuid",
+  "user_id": "user_uuid",
+  "access_level": "viewer|full_access",
+  "created_at": "2026-10-09T12:00:00Z"
+}
 ```
 
 ## API Endpoints
 
 ### Authentication
-- `POST /api/auth/login` - Azure AD login, returns JWT
+- `POST /api/auth/login` - Azure AD login, returns JWT (future)
 
 ### User Management
 - `POST /api/users/register` - Register new user (end user or installer)
-- `GET /api/users/me` - Get current user info
+- `GET /api/users/me` - Get current user info (future)
 
 ### Instance Management
 - `POST /api/instances/register` - Register HAOS instance (from add-on)
 - `GET /api/instances` - List accessible instances
-- `GET /api/instances/{id}` - Get instance details
+- `GET /api/instances/{id}` - Get instance details (future)
 
 ### Data Access
 - `GET /api/instances/{id}/snapshot/latest` - Get latest snapshot
-- `GET /api/instances/{id}/snapshots` - List historical snapshots
-- `GET /api/instances/{id}/snapshots/{snapshot_id}` - Get specific snapshot
+- `GET /api/instances/{id}/snapshots` - List historical snapshots (future)
+- `GET /api/instances/{id}/snapshots/{snapshot_id}` - Get specific snapshot (future)
 
 ## Environment Variables
 
 ### Azure Functions
 ```
-AZURE_SQL_CONNECTION_STRING=<sql_connection_string>
+COSMOS_DB_CONNECTION_STRING=<cosmos_db_connection_string>
 AZURE_BLOB_CONNECTION_STRING=<blob_connection_string>
 AZURE_AD_TENANT_ID=<tenant_id>
 AZURE_AD_CLIENT_ID=<client_id>
@@ -109,7 +129,8 @@ API_BASE_URL=https://your-functions-app.azurewebsites.net
 ### HAOS Add-on
 ```
 clearsky_platform:
-  api_base_url: "https://your-functions-app.azurewebsites.net"
+  platform_enabled: true
+  platform_api_url: "https://your-functions-app.azurewebsites.net"
   registration_token: ""  # Obtained from user registration
   instance_name: "My Home"
 ```
@@ -129,25 +150,63 @@ clearsky-platform/
 │       └── snapshots/
 ```
 
-## Cost Estimate (MVP)
+## Cost Estimate (MVP - Optimized)
 
-- Azure Functions (Consumption): ~$0-5/month
-- Azure SQL (Basic Serverless): ~$5-10/month
-- Azure Blob Storage: ~$0-2/month
+- Azure Functions (Consumption): ~$0-2/month
+- Azure Cosmos DB (Serverless): ~$0.02/month (pay per request)
+- Azure Blob Storage: ~$0.51/month (Hot + Cool tiers)
 - Azure Static Web Apps: Free tier
 - Azure AD: Free tier
 
-**Total: ~$5-17/month for MVP**
+**Total: ~$2.53/month for MVP**
+
+**First 12 months: $0** (using Azure free tiers)
+
+### Cost Breakdown by Scale
+
+| Users | Instances | Monthly Cost |
+|-------|-----------|--------------|
+| 1     | 1-2       | $0-2.53      |
+| 10    | 10-20     | $5-10        |
+| 50    | 50-100    | $20-30       |
+| 100   | 100-200   | $40-50       |
+
+### When to Scale
+
+When Cosmos DB Serverless costs reach ~$50-100/month:
+- Migrate to Provisioned Throughput (no code changes)
+- Set fixed RU/s (e.g., 400 RU/s)
+- More cost-effective at scale
 
 ## Setup Order
 
 1. Create Resource Group
 2. Create Storage Account (for Functions + Blobs)
-3. Create Azure SQL Database
-4. Create Azure Functions App
-5. Configure Azure AD App Registration
-6. Create Static Web App
-7. Deploy database schema
+3. Create Azure Cosmos DB Account (Serverless)
+4. Create Cosmos DB database and containers
+5. Create Azure Functions App
+6. Configure Azure AD App Registration (future)
+7. Create Static Web App
 8. Deploy Functions code
 9. Deploy web app
 10. Test end-to-end
+
+## Cost Optimization Tips
+
+1. **Use Azure Free Tiers** (first 12 months):
+   - $200 credit for first 30 days
+   - Free Functions (1M requests)
+   - Free Blob Storage (5GB)
+   - Free Cosmos DB (limited)
+
+2. **Implement Snapshot Compression**:
+   - gzip compression reduces storage by ~70%
+   - Reduces costs from $0.51 to ~$0.15/month
+
+3. **Use Hot/Cool Storage Tiers**:
+   - Keep 7 days in Hot, rest in Cool
+   - Reduces storage costs by ~35%
+
+4. **Archive Old Snapshots**:
+   - Move >30 days to Archive tier
+   - Further cost reduction
