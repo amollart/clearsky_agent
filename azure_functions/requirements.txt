@@ -1,0 +1,8 @@
+azure-functions
+azure-functions-worker
+azure-storage-blob
+pyodbc
+python-jose[cryptography]
+passlib[bcrypt]
+python-dotenv
+aiohttp

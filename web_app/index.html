@@ -290,15 +290,28 @@
       <div class="space-y-4 text-xs">
         <div>
           <label class="block font-semibold text-slate-300 mb-1">Select Connection Mode:</label>
-          <div class="grid grid-cols-2 gap-2">
-            <button type="button" onclick="setMode('server')" id="modeBtn-server" class="p-3 rounded-xl border text-left flex flex-col space-y-1 transition border-skybrand-500 bg-skybrand-500/10 text-white">
+          <div class="grid grid-cols-3 gap-2">
+            <button type="button" onclick="setMode('platform')" id="modeBtn-platform" class="p-3 rounded-xl border text-left flex flex-col space-y-1 transition border-skybrand-500 bg-skybrand-500/10 text-white">
+              <span class="font-bold">Platform API</span>
+              <span class="text-[10px] text-slate-400">ClearSky Platform</span>
+            </button>
+            <button type="button" onclick="setMode('server')" id="modeBtn-server" class="p-3 rounded-xl border text-left flex flex-col space-y-1 transition border-slate-700 bg-slate-800/50 text-slate-300 hover:border-slate-600">
               <span class="font-bold">Backend API</span>
-              <span class="text-[10px] text-slate-400">Uses companion server proxy</span>
+              <span class="text-[10px] text-slate-400">Companion server</span>
             </button>
             <button type="button" onclick="setMode('direct_azure')" id="modeBtn-direct_azure" class="p-3 rounded-xl border text-left flex flex-col space-y-1 transition border-slate-700 bg-slate-800/50 text-slate-300 hover:border-slate-600">
-              <span class="font-bold">Direct Azure Blob</span>
-              <span class="text-[10px] text-slate-400">Connect via Blob SAS URL</span>
+              <span class="font-bold">Direct Azure</span>
+              <span class="text-[10px] text-slate-400">Blob SAS URL</span>
             </button>
+          </div>
+        </div>
+
+        <!-- Platform API Inputs -->
+        <div id="platformInputs" class="space-y-3 bg-slate-950 p-3.5 rounded-xl border border-slate-800">
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">Platform API URL:</label>
+            <input type="text" id="cfgPlatformUrl" placeholder="https://your-functions-app.azurewebsites.net" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-skybrand-500" />
+            <p class="text-[10px] text-slate-500 mt-1">Your ClearSky Platform Azure Functions URL.</p>
           </div>
         </div>
 
@@ -317,7 +330,7 @@
         </div>
 
         <!-- Server URL Input -->
-        <div id="serverInputs" class="space-y-3 bg-slate-950 p-3.5 rounded-xl border border-slate-800">
+        <div id="serverInputs" class="hidden space-y-3 bg-slate-950 p-3.5 rounded-xl border border-slate-800">
           <div>
             <label class="block font-semibold text-slate-300 mb-1">Backend Server API URL:</label>
             <input type="text" id="cfgServerUrl" value="/api/snapshot/latest" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-skybrand-500" />
@@ -354,8 +367,10 @@
   <script>
     // State
     let currentSnapshot = null;
+    let currentInstanceId = null;
     let config = {
-      mode: 'server', // 'server' | 'direct_azure'
+      mode: 'platform', // 'platform' | 'server' | 'direct_azure'
+      platformUrl: '',
       serverUrl: '/api/snapshot/latest',
       blobUrl: '',
       containerUrl: '',
@@ -372,6 +387,7 @@
       if (saved) {
         try { config = { ...config, ...jsonParse(saved) }; } catch (e) {}
       }
+      document.getElementById('cfgPlatformUrl').value = config.platformUrl || '';
       document.getElementById('cfgServerUrl').value = config.serverUrl;
       document.getElementById('cfgBlobUrl').value = config.blobUrl;
       document.getElementById('cfgContainerUrl').value = config.containerUrl || '';
@@ -381,28 +397,32 @@
 
     function setMode(mode, updateUI = true) {
       config.mode = mode;
+      const btnPlatform = document.getElementById('modeBtn-platform');
       const btnServer = document.getElementById('modeBtn-server');
       const btnAzure = document.getElementById('modeBtn-direct_azure');
+      const platformInputs = document.getElementById('platformInputs');
       const serverInputs = document.getElementById('serverInputs');
       const azureInputs = document.getElementById('azureInputs');
 
-      if (mode === 'server') {
-        btnServer.className = "p-3 rounded-xl border text-left flex flex-col space-y-1 transition border-skybrand-500 bg-skybrand-500/10 text-white";
-        btnAzure.className = "p-3 rounded-xl border text-left flex flex-col space-y-1 transition border-slate-700 bg-slate-800/50 text-slate-300 hover:border-slate-600";
-        serverInputs.classList.remove('hidden');
-        azureInputs.classList.add('hidden');
-      } else {
-        btnAzure.className = "p-3 rounded-xl border text-left flex flex-col space-y-1 transition border-skybrand-500 bg-skybrand-500/10 text-white";
-        btnServer.className = "p-3 rounded-xl border text-left flex flex-col space-y-1 transition border-slate-700 bg-slate-800/50 text-slate-300 hover:border-slate-600";
-        azureInputs.classList.remove('hidden');
-        serverInputs.classList.add('hidden');
-      }
+      // Reset all buttons
+      const defaultClass = "p-3 rounded-xl border text-left flex flex-col space-y-1 transition border-slate-700 bg-slate-800/50 text-slate-300 hover:border-slate-600";
+      const activeClass = "p-3 rounded-xl border text-left flex flex-col space-y-1 transition border-skybrand-500 bg-skybrand-500/10 text-white";
+
+      btnPlatform.className = mode === 'platform' ? activeClass : defaultClass;
+      btnServer.className = mode === 'server' ? activeClass : defaultClass;
+      btnAzure.className = mode === 'direct_azure' ? activeClass : defaultClass;
+
+      // Show/hide inputs
+      platformInputs.classList.toggle('hidden', mode !== 'platform');
+      serverInputs.classList.toggle('hidden', mode !== 'server');
+      azureInputs.classList.toggle('hidden', mode !== 'direct_azure');
     }
 
     function openConfigModal() { document.getElementById('configModal').classList.remove('hidden'); }
     function closeConfigModal() { document.getElementById('configModal').classList.add('hidden'); }
 
     function saveConfiguration() {
+      config.platformUrl = document.getElementById('cfgPlatformUrl').value.trim();
       config.serverUrl = document.getElementById('cfgServerUrl').value.trim() || '/api/snapshot/latest';
       config.blobUrl = document.getElementById('cfgBlobUrl').value.trim();
       config.containerUrl = document.getElementById('cfgContainerUrl').value.trim();
@@ -441,7 +461,27 @@
       try {
         let snapshotData = null;
 
-        if (config.mode === 'direct_azure') {
+        if (config.mode === 'platform') {
+          // Platform API mode
+          if (!config.platformUrl) {
+            throw new Error('Platform API URL is not configured. Please open Settings.');
+          }
+          if (!currentInstanceId) {
+            // For MVP, just use the first available instance
+            const instancesRes = await fetch(`${config.platformUrl}/api/instances`);
+            if (!instancesRes.ok) throw new Error(`Platform API HTTP ${instancesRes.status}`);
+            const instancesData = await instancesRes.json();
+            if (instancesData.instances && instancesData.instances.length > 0) {
+              currentInstanceId = instancesData.instances[0].instance_uuid;
+            } else {
+              throw new Error('No instances found. Please register a HAOS instance first.');
+            }
+          }
+          const res = await fetch(`${config.platformUrl}/api/instances/${currentInstanceId}/snapshot/latest`, { cache: 'no-store' });
+          if (!res.ok) throw new Error(`Platform API HTTP ${res.status}: ${res.statusText}`);
+          snapshotData = await res.json();
+          updateSourceStatus('ClearSky Platform', 'emerald');
+        } else if (config.mode === 'direct_azure') {
           if (!config.blobUrl) {
             throw new Error('Azure Blob SAS URL is not configured. Please open Settings.');
           }

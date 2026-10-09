@@ -1,4 +1,14 @@
 <!-- https://developers.home-assistant.io/docs/apps/presentation#keeping-a-changelog -->
+## 0.3.0
+
+- Add ClearSky Platform integration (Phase 1 MVP)
+- Add platform registration flow with registration token
+- Add instance UUID generation and persistence
+- Add platform upload functionality for snapshots
+- Add platform status in /api/status endpoint
+- Maintain backward compatibility with direct Azure uploads
+- Add new config options: platform_enabled, platform_api_url, registration_token, instance_name
+
 ## 0.2.2
 
 - Add N/A warranty state for devices without warranty information

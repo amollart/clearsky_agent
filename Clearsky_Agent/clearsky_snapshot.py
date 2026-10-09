@@ -37,6 +37,12 @@ def load_addon_config():
     """Read configuration from /data/options.json with fallback to environment variables."""
     config = {
         "poll_interval": 90,
+        # Platform Configuration (Phase 1)
+        "platform_enabled": False,
+        "platform_api_url": "",
+        "registration_token": "",
+        "instance_name": "My Home",
+        # Legacy Direct Azure Upload (backward compatible)
         "azure_upload_enabled": True,
         "azure_storage_connection_string": "",
         "azure_container_name": "clearsky-snapshots",
@@ -47,6 +53,16 @@ def load_addon_config():
                 opts = json.load(f)
                 if "poll_interval" in opts and opts["poll_interval"]:
                     config["poll_interval"] = int(opts["poll_interval"])
+                # Platform config
+                if "platform_enabled" in opts:
+                    config["platform_enabled"] = bool(opts["platform_enabled"])
+                if "platform_api_url" in opts and opts["platform_api_url"]:
+                    config["platform_api_url"] = str(opts["platform_api_url"]).strip()
+                if "registration_token" in opts and opts["registration_token"]:
+                    config["registration_token"] = str(opts["registration_token"]).strip()
+                if "instance_name" in opts and opts["instance_name"]:
+                    config["instance_name"] = str(opts["instance_name"]).strip()
+                # Legacy Azure config
                 if "azure_upload_enabled" in opts:
                     config["azure_upload_enabled"] = bool(opts["azure_upload_enabled"])
                 if "azure_storage_connection_string" in opts and opts["azure_storage_connection_string"]:
@@ -62,6 +78,14 @@ def load_addon_config():
             config["poll_interval"] = int(os.getenv("POLL_INTERVAL"))
         except ValueError:
             pass
+    if os.getenv("PLATFORM_ENABLED"):
+        config["platform_enabled"] = os.getenv("PLATFORM_ENABLED").lower() in ("true", "1", "yes")
+    if os.getenv("PLATFORM_API_URL"):
+        config["platform_api_url"] = os.getenv("PLATFORM_API_URL").strip()
+    if os.getenv("REGISTRATION_TOKEN"):
+        config["registration_token"] = os.getenv("REGISTRATION_TOKEN").strip()
+    if os.getenv("INSTANCE_NAME"):
+        config["instance_name"] = os.getenv("INSTANCE_NAME").strip()
     if os.getenv("AZURE_UPLOAD_ENABLED"):
         config["azure_upload_enabled"] = os.getenv("AZURE_UPLOAD_ENABLED").lower() in ("true", "1", "yes")
     if os.getenv("AZURE_STORAGE_CONNECTION_STRING"):
@@ -78,6 +102,16 @@ azure_upload_status = {
     "last_attempt": None,
     "last_error": None,
     "blobs_written": []
+}
+
+# In-memory status tracker for Platform sync
+platform_upload_status = {
+    "last_status": "disabled",
+    "last_success": None,
+    "last_attempt": None,
+    "last_error": None,
+    "registered": False,
+    "instance_id": None
 }
 
 # Global shutdown event
@@ -375,18 +409,27 @@ async def save_warranty_api(request):
     return web.json_response({"status": "ok"})
 
 async def get_status_api(request):
-    """API returning system health and Azure upload status."""
+    """API returning system health and upload status."""
     config = load_addon_config()
     conn_configured = bool(config.get("azure_storage_connection_string"))
+    platform_configured = bool(config.get("platform_api_url") and config.get("registration_token"))
     return web.json_response({
-        "version": "0.2.1",
+        "version": "0.3.0",
         "poll_interval": config.get("poll_interval", 90),
+        "instance_uuid": get_or_create_instance_uuid(),
         "azure": {
             "upload_enabled": config.get("azure_upload_enabled", True),
             "configured": conn_configured,
             "container_name": config.get("azure_container_name", "clearsky-snapshots"),
             "sdk_available": AZURE_SDK_AVAILABLE,
             "status": azure_upload_status
+        },
+        "platform": {
+            "enabled": config.get("platform_enabled", False),
+            "configured": platform_configured,
+            "api_url": config.get("platform_api_url", ""),
+            "instance_name": config.get("instance_name", "My Home"),
+            "status": platform_upload_status
         },
         "server_time": datetime.now().astimezone().isoformat()
     })
@@ -607,6 +650,92 @@ async def upload_to_azure_async(snapshot: dict, config: dict) -> None:
         azure_upload_status["last_error"] = str(e)
         _LOGGER.error(f"Failed to upload snapshot to Azure Storage: {e}")
 
+# Platform Registration (Phase 1)
+INSTANCE_UUID_PATH = "/data/instance_uuid.json"
+
+def get_or_create_instance_uuid():
+    """Get existing instance UUID or create a new one."""
+    if os.path.exists(INSTANCE_UUID_PATH):
+        try:
+            with open(INSTANCE_UUID_PATH, "r") as f:
+                data = json.load(f)
+                return data.get("instance_uuid")
+        except Exception as e:
+            _LOGGER.error(f"Error loading instance UUID: {e}")
+    
+    # Create new UUID
+    import uuid
+    instance_uuid = str(uuid.uuid4())
+    try:
+        with open(INSTANCE_UUID_PATH, "w") as f:
+            json.dump({"instance_uuid": instance_uuid}, f)
+        _LOGGER.info(f"Created new instance UUID: {instance_uuid}")
+    except Exception as e:
+        _LOGGER.error(f"Error saving instance UUID: {e}")
+    
+    return instance_uuid
+
+async def register_with_platform(config: dict) -> dict:
+    """Register this instance with the ClearSky Platform."""
+    registration_token = config.get("registration_token", "").strip()
+    instance_name = config.get("instance_name", "My Home")
+    platform_api_url = config.get("platform_api_url", "").strip()
+    
+    if not registration_token or not platform_api_url:
+        _LOGGER.warning("Platform registration skipped: registration_token or platform_api_url not set")
+        return None
+    
+    instance_uuid = get_or_create_instance_uuid()
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            url = f"{platform_api_url.rstrip('/')}/api/instances/register"
+            payload = {
+                "registration_token": registration_token,
+                "instance_uuid": instance_uuid,
+                "instance_name": instance_name,
+                "ha_version": os.getenv("HOMEASSISTANT_VERSION", "unknown")
+            }
+            
+            _LOGGER.info(f"Registering instance with platform: {url}")
+            async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    _LOGGER.info(f"Successfully registered instance: {data.get('instance_id')}")
+                    return data
+                else:
+                    error_text = await response.text()
+                    _LOGGER.error(f"Platform registration failed: {response.status} - {error_text}")
+                    return None
+    except Exception as e:
+        _LOGGER.error(f"Error during platform registration: {e}")
+        return None
+
+async def upload_to_platform(snapshot: dict, config: dict) -> None:
+    """Upload snapshot to ClearSky Platform."""
+    if not config.get("platform_enabled"):
+        return
+    
+    platform_api_url = config.get("platform_api_url", "").strip()
+    if not platform_api_url:
+        return
+    
+    instance_uuid = get_or_create_instance_uuid()
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            url = f"{platform_api_url.rstrip('/')}/api/instances/{instance_uuid}/snapshot"
+            
+            _LOGGER.debug(f"Uploading snapshot to platform: {url}")
+            async with session.post(url, json=snapshot, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                if response.status == 200:
+                    _LOGGER.debug("Successfully uploaded snapshot to platform")
+                else:
+                    error_text = await response.text()
+                    _LOGGER.warning(f"Platform upload failed: {response.status} - {error_text}")
+    except Exception as e:
+        _LOGGER.error(f"Error during platform upload: {e}")
+
 def handle_sigterm(signum, frame):
     """Graceful shutdown handler for Docker stop signals."""
     _LOGGER.info("Received SIGTERM – shutting down.")
@@ -628,6 +757,15 @@ async def main_loop():
     """Run forever, polling and saving snapshots every configured poll interval."""
     _LOGGER.info("ClearSky agent snapshot loop started.")
 
+    # Register with platform on startup if enabled
+    config = load_addon_config()
+    if config.get("platform_enabled"):
+        registration_result = await register_with_platform(config)
+        if registration_result:
+            platform_upload_status["registered"] = True
+            platform_upload_status["instance_id"] = registration_result.get("instance_id")
+            platform_upload_status["last_status"] = "registered"
+
     while not shutdown_event.is_set():
         config = load_addon_config()
         poll_interval = config.get("poll_interval", 90)
@@ -646,7 +784,7 @@ async def main_loop():
                 # 1. Local rotated write
                 await write_snapshot_async(snapshot)
 
-                # 2. Azure Storage upload
+                # 2. Azure Storage upload (legacy)
                 if config.get("azure_upload_enabled"):
                     if config.get("azure_storage_connection_string"):
                         await upload_to_azure_async(snapshot, config)
@@ -655,6 +793,21 @@ async def main_loop():
                         _LOGGER.debug("Azure upload skipped: Connection string not set in options.")
                 else:
                     azure_upload_status["last_status"] = "disabled"
+
+                # 3. Platform upload (Phase 1)
+                if config.get("platform_enabled"):
+                    platform_upload_status["last_attempt"] = datetime.now().astimezone().isoformat()
+                    try:
+                        await upload_to_platform(snapshot, config)
+                        platform_upload_status["last_status"] = "success"
+                        platform_upload_status["last_success"] = datetime.now().astimezone().isoformat()
+                        platform_upload_status["last_error"] = None
+                    except Exception as e:
+                        platform_upload_status["last_status"] = "failed"
+                        platform_upload_status["last_error"] = str(e)
+                        _LOGGER.error(f"Platform upload failed: {e}")
+                else:
+                    platform_upload_status["last_status"] = "disabled"
         except asyncio.TimeoutError:
             _LOGGER.warning("API request timed out – will retry")
         except Exception as e:
